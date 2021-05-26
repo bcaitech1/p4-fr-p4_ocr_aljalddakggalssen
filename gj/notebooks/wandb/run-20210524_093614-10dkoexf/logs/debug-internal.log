@@ -1,0 +1,86 @@
+2021-05-24 09:36:18,529 INFO    MainThread:6215 [internal.py:wandb_internal():91] W&B internal server running at pid: 6215, started at: 2021-05-24 09:36:18.529123
+2021-05-24 09:36:18,532 INFO    WriterThread:6215 [datastore.py:open_for_write():77] open: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/run-10dkoexf.wandb
+2021-05-24 09:36:18,535 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: check_version
+2021-05-24 09:36:18,536 DEBUG   SenderThread:6215 [sender.py:send():176] send: header
+2021-05-24 09:36:18,536 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: check_version
+2021-05-24 09:36:18,767 DEBUG   SenderThread:6215 [sender.py:send():176] send: run
+2021-05-24 09:36:18,771 DEBUG   SenderThread:6215 [git.py:repo():33] git repository is invalid
+2021-05-24 09:36:18,984 INFO    SenderThread:6215 [dir_watcher.py:__init__():168] watching files in: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files
+2021-05-24 09:36:18,986 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: run_start
+2021-05-24 09:36:18,986 INFO    SenderThread:6215 [sender.py:_start_run_threads():699] run started: 10dkoexf with start time 1621848977
+2021-05-24 09:36:18,987 DEBUG   SenderThread:6215 [sender.py:send():176] send: summary
+2021-05-24 09:36:18,989 INFO    SenderThread:6215 [sender.py:_save_file():821] saving file wandb-summary.json with policy end
+2021-05-24 09:36:18,993 DEBUG   HandlerThread:6215 [meta.py:__init__():39] meta init
+2021-05-24 09:36:18,993 DEBUG   HandlerThread:6215 [meta.py:__init__():53] meta init done
+2021-05-24 09:36:18,994 DEBUG   HandlerThread:6215 [meta.py:probe():210] probe
+2021-05-24 09:36:19,001 DEBUG   HandlerThread:6215 [git.py:repo():33] git repository is invalid
+2021-05-24 09:36:19,001 DEBUG   HandlerThread:6215 [meta.py:_save_pip():57] save pip
+2021-05-24 09:36:19,002 DEBUG   HandlerThread:6215 [meta.py:_save_pip():71] save pip done
+2021-05-24 09:36:19,002 DEBUG   HandlerThread:6215 [meta.py:_save_conda():78] save conda
+2021-05-24 09:36:19,986 INFO    Thread-8  :6215 [dir_watcher.py:_on_file_created():216] file/dir created: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/conda-environment.yaml
+2021-05-24 09:36:19,987 INFO    Thread-8  :6215 [dir_watcher.py:_on_file_created():216] file/dir created: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/wandb-summary.json
+2021-05-24 09:36:19,987 INFO    Thread-8  :6215 [dir_watcher.py:_on_file_created():216] file/dir created: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/requirements.txt
+2021-05-24 09:36:21,709 DEBUG   HandlerThread:6215 [meta.py:_save_conda():86] save conda done
+2021-05-24 09:36:21,709 DEBUG   HandlerThread:6215 [meta.py:probe():252] probe done
+2021-05-24 09:36:21,712 DEBUG   SenderThread:6215 [sender.py:send():176] send: files
+2021-05-24 09:36:21,713 INFO    SenderThread:6215 [sender.py:_save_file():821] saving file wandb-metadata.json with policy now
+2021-05-24 09:36:21,720 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:36:21,720 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:36:21,986 INFO    Thread-8  :6215 [dir_watcher.py:_on_file_created():216] file/dir created: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/wandb-metadata.json
+2021-05-24 09:36:21,986 INFO    Thread-8  :6215 [dir_watcher.py:_on_file_created():216] file/dir created: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/output.log
+2021-05-24 09:36:22,335 INFO    Thread-11 :6215 [upload_job.py:push():133] Uploaded file /tmp/tmptrhdui5pwandb/2wkongp5-wandb-metadata.json
+2021-05-24 09:36:36,896 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:36:36,897 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:36:47,137 DEBUG   SenderThread:6215 [sender.py:send():176] send: stats
+2021-05-24 09:36:52,081 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:36:52,081 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:37:07,260 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:37:07,261 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:37:17,261 DEBUG   SenderThread:6215 [sender.py:send():176] send: stats
+2021-05-24 09:37:22,444 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:37:22,444 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:37:37,630 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:37:37,630 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:37:47,383 DEBUG   SenderThread:6215 [sender.py:send():176] send: stats
+2021-05-24 09:37:52,813 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:37:52,815 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:38:07,999 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:38:07,999 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:38:17,507 DEBUG   SenderThread:6215 [sender.py:send():176] send: stats
+2021-05-24 09:38:23,187 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:38:23,188 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:38:38,375 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:38:38,375 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:38:45,524 WARNING MainThread:6215 [internal.py:wandb_internal():147] Internal process interrupt: 1
+2021-05-24 09:38:47,638 DEBUG   SenderThread:6215 [sender.py:send():176] send: stats
+2021-05-24 09:38:53,559 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:38:53,560 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:39:08,742 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:39:08,742 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:39:17,768 DEBUG   SenderThread:6215 [sender.py:send():176] send: stats
+2021-05-24 09:39:23,926 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:39:23,926 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:39:39,104 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:39:39,105 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:39:47,898 DEBUG   SenderThread:6215 [sender.py:send():176] send: stats
+2021-05-24 09:39:53,901 WARNING MainThread:6215 [internal.py:wandb_internal():147] Internal process interrupt: 2
+2021-05-24 09:39:53,902 ERROR   MainThread:6215 [internal.py:wandb_internal():150] Internal process interrupted.
+2021-05-24 09:39:54,284 DEBUG   HandlerThread:6215 [handler.py:handle_request():121] handle_request: stop_status
+2021-05-24 09:39:54,284 INFO    HandlerThread:6215 [handler.py:finish():632] shutting down handler
+2021-05-24 09:39:54,284 DEBUG   SenderThread:6215 [sender.py:send_request():186] send_request: stop_status
+2021-05-24 09:39:54,460 INFO    SenderThread:6215 [sender.py:finish():925] shutting down sender
+2021-05-24 09:39:54,460 INFO    SenderThread:6215 [dir_watcher.py:finish():282] shutting down directory watcher
+2021-05-24 09:39:54,901 INFO    WriterThread:6215 [datastore.py:close():258] close: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/run-10dkoexf.wandb
+2021-05-24 09:39:55,019 INFO    SenderThread:6215 [dir_watcher.py:finish():312] scan: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files
+2021-05-24 09:39:55,019 INFO    SenderThread:6215 [dir_watcher.py:finish():318] scan save: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/conda-environment.yaml conda-environment.yaml
+2021-05-24 09:39:55,019 INFO    SenderThread:6215 [dir_watcher.py:finish():318] scan save: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/output.log output.log
+2021-05-24 09:39:55,020 INFO    SenderThread:6215 [dir_watcher.py:finish():318] scan save: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/wandb-metadata.json wandb-metadata.json
+2021-05-24 09:39:55,020 INFO    SenderThread:6215 [dir_watcher.py:finish():318] scan save: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/requirements.txt requirements.txt
+2021-05-24 09:39:55,020 INFO    SenderThread:6215 [dir_watcher.py:finish():318] scan save: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/config.yaml config.yaml
+2021-05-24 09:39:55,020 INFO    SenderThread:6215 [dir_watcher.py:finish():318] scan save: /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/wandb-summary.json wandb-summary.json
+2021-05-24 09:39:55,023 INFO    SenderThread:6215 [file_pusher.py:finish():176] shutting down file pusher
+2021-05-24 09:39:55,023 INFO    SenderThread:6215 [file_pusher.py:join():181] waiting for file pusher
+2021-05-24 09:39:55,604 INFO    Thread-13 :6215 [upload_job.py:push():133] Uploaded file /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/config.yaml
+2021-05-24 09:39:55,673 INFO    Thread-12 :6215 [upload_job.py:push():133] Uploaded file /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/requirements.txt
+2021-05-24 09:39:55,725 INFO    Thread-14 :6215 [upload_job.py:push():133] Uploaded file /opt/ml/code/notebooks/wandb/run-20210524_093614-10dkoexf/files/wandb-summary.json
+2021-05-24 09:39:56,209 INFO    MainThread:6215 [internal.py:handle_exit():78] Internal process exited
