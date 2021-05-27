@@ -1,0 +1,21 @@
+{
+    "os": "Linux-4.4.0-210-generic-x86_64-with-debian-buster-sid",
+    "python": "3.7.7",
+    "heartbeatAt": "2021-05-24T09:35:56.839987",
+    "startedAt": "2021-05-24T09:35:55.687791",
+    "docker": null,
+    "gpu": "Tesla V100-PCIE-32GB",
+    "gpu_count": 1,
+    "cpu_count": 8,
+    "cuda": null,
+    "args": [
+        "-f",
+        "/opt/ml/.local/share/jupyter/runtime/kernel-98831686-2f74-4078-abec-39db677d1aa5.json"
+    ],
+    "state": "running",
+    "program": "code/notebooks/eda.ipynb",
+    "root": "/opt/ml",
+    "host": "1d8dd2919af1",
+    "username": "root",
+    "executable": "/opt/conda/bin/python"
+}

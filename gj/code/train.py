@@ -512,7 +512,7 @@ if __name__ == "__main__":
         "-c",
         "--config_file",
         dest="config_file",
-        default="/opt/ml/code/code/src/configs/Default.yaml",
+        default="/opt/ml/team/gj/code/configs/Default.yaml",
         type=str,
         help="Path of configuration file",
     )
