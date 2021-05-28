@@ -10,7 +10,7 @@ from dataset import START, PAD
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class BottleneckBlock(nn.Module):
+class BottleneckBlock(nn.Module): # 1x1로 channel 작게 -> 3x3으로 원하는 채널 생성 + 시야각 늘리기
     """
     Dense Bottleneck Block
 
@@ -72,7 +72,7 @@ class TransitionBlock(nn.Module):
         return self.pool(out)
 
 
-class DenseBlock(nn.Module):
+class DenseBlock(nn.Module): 
     """
     Dense block
 
@@ -113,7 +113,7 @@ class DeepCNN300(nn.Module):
         self, input_channel, num_in_features, output_channel=256, dropout_rate=0.2, depth=16, growth_rate=24
     ):
         super(DeepCNN300, self).__init__()
-        self.conv0 = nn.Conv2d(
+        self.conv0 = nn.Conv2d( # 무조건 1/2
             input_channel,  # 3
             num_in_features,  # 48
             kernel_size=7,
@@ -151,14 +151,19 @@ class DeepCNN300(nn.Module):
         )
 
     def forward(self, input):
-        out = self.conv0(input)  # (H, V, )
+        # NF = num_features
+        # D = depth
+        # GR = growth_rate
+        # input [B, C, H, W] = [B, 1, 128, 128]
+        out = self.conv0(input)  # [B, NF, H//2, W//2] = [B, 48, 64, 64]
         out = self.relu(self.norm0(out))
-        out = self.max_pool(out)
-        out = self.block1(out)
-        out = self.trans1(out)
-        out = self.block2(out)
+        out = self.max_pool(out) # [B, NF, H//4, W//4] = [B, 48, 32, 32]
+        out = self.block1(out) # [B, NF+D*GR, H//4, W//4] = [B, 432, 32, 32]
+        out = self.trans1(out) # [B, (NF+D*GR)//2, H//8, W//8] = [B, 216, 16, 16]
+        out = self.block2(out) # [B, (NF+D*GR)//2+D*GR, H//8, W//8] = [B, 600, 16, 16]
         out_before_trans2 = self.trans2_relu(self.trans2_norm(out))
-        out_A = self.trans2_conv(out_before_trans2)
+        out_A = self.trans2_conv(out_before_trans2)  
+        # [B, ((NF+D*GR)//2+D*GR)//2, H//8, W//8] = [B, 300, 16, 16]
         return out_A  # 128 x (16x16)
 
 
@@ -275,7 +280,7 @@ class TransformerEncoderLayer(nn.Module):
 
 
 class PositionalEncoding2D(nn.Module):
-    def __init__(self, in_channels, max_h=64, max_w=128, dropout=0.1):
+    def __init__(self, in_channels, device, max_h=64, max_w=128, dropout=0.1):
         super(PositionalEncoding2D, self).__init__()
 
         self.h_position_encoder = self.generate_encoder(in_channels // 2, max_h)
@@ -285,6 +290,7 @@ class PositionalEncoding2D(nn.Module):
         self.w_linear = nn.Linear(in_channels // 2, in_channels // 2)
 
         self.dropout = nn.Dropout(p=dropout)
+        self.device = device
 
     def generate_encoder(self, in_channels, max_len):
         pos = torch.arange(max_len).float().unsqueeze(1)
@@ -299,12 +305,12 @@ class PositionalEncoding2D(nn.Module):
         ### Require DEBUG
         b, c, h, w = input.size()
         h_pos_encoding = (
-            self.h_position_encoder[:h, :].unsqueeze(1).to(input.get_device())
-        )
+            self.h_position_encoder[:h, :].unsqueeze(1).to(self.device)
+        ) # H 1 D
         h_pos_encoding = self.h_linear(h_pos_encoding)  # [H, 1, D]
 
         w_pos_encoding = (
-            self.w_position_encoder[:w, :].unsqueeze(0).to(input.get_device())
+            self.w_position_encoder[:w, :].unsqueeze(0).to(self.device)
         )
         w_pos_encoding = self.w_linear(w_pos_encoding)  # [1, W, D]
 
@@ -336,6 +342,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         filter_size,
         head_num,
         layer_num,
+        device,
         dropout_rate=0.1,
         checkpoint=None,
     ):
@@ -347,7 +354,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             output_channel=hidden_dim,
             dropout_rate=dropout_rate,
         )
-        self.positional_encoding = PositionalEncoding2D(hidden_dim)
+        self.positional_encoding = PositionalEncoding2D(hidden_dim, device=device)
         self.attention_layers = nn.ModuleList(
             [
                 TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate)
@@ -358,8 +365,10 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             self.load_state_dict(checkpoint)
 
     def forward(self, input):
-
-        out = self.shallow_cnn(input)  # [b, c, h, w]
+        # input [B, C, H, W] = [B, 1, 128, 128]
+        out = self.shallow_cnn(input)  
+        # [B, ((NF+D*GR)//2+D*GR)//2, H//8, W//8] = [B, 300, 16, 16]
+        # NF//4 + 3*D*GR//4 = SATRN.encoder.hidden_dim
         out = self.positional_encoding(out)  # [b, c, h, w]
 
         # flatten
@@ -368,7 +377,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
 
         for layer in self.attention_layers:
             out = layer(out)
-        return out
+        return out # [b, h*w, c]
 
 
 class TransformerDecoderLayer(nn.Module):
@@ -421,12 +430,13 @@ class TransformerDecoderLayer(nn.Module):
 
 
 class PositionEncoder1D(nn.Module):
-    def __init__(self, in_channels, max_len=500, dropout=0.1):
+    def __init__(self, in_channels, device, max_len=500, dropout=0.1):
         super(PositionEncoder1D, self).__init__()
 
         self.position_encoder = self.generate_encoder(in_channels, max_len)
         self.position_encoder = self.position_encoder.unsqueeze(0)
         self.dropout = nn.Dropout(p=dropout)
+        self.device = device
 
     def generate_encoder(self, in_channels, max_len):
         pos = torch.arange(max_len).float().unsqueeze(1)
@@ -442,10 +452,10 @@ class PositionEncoder1D(nn.Module):
 
     def forward(self, x, point=-1):
         if point == -1:
-            out = x + self.position_encoder[:, : x.size(1), :].to(x.get_device())
+            out = x + self.position_encoder[:, : x.size(1), :].to(self.device)
             out = self.dropout(out)
         else:
-            out = x + self.position_encoder[:, point, :].unsqueeze(1).to(x.get_device())
+            out = x + self.position_encoder[:, point, :].unsqueeze(1).to(self.device)
         return out
 
 
@@ -473,7 +483,7 @@ class TransformerDecoder(nn.Module):
         self.layer_num = layer_num
 
         self.pos_encoder = PositionEncoder1D(
-            in_channels=hidden_dim, dropout=dropout_rate
+            in_channels=hidden_dim, dropout=dropout_rate, device=device
         )
 
         self.attention_layers = nn.ModuleList(
@@ -562,6 +572,7 @@ class SATRN(nn.Module):
             head_num=FLAGS.SATRN.encoder.head_num,
             layer_num=FLAGS.SATRN.encoder.layer_num,
             dropout_rate=FLAGS.dropout_rate,
+            device=device,
         )
 
         self.decoder = TransformerDecoder(
@@ -585,7 +596,8 @@ class SATRN(nn.Module):
             self.load_state_dict(checkpoint)
 
     def forward(self, input, expected, is_train, teacher_forcing_ratio):
-        enc_result = self.encoder(input)
+        # input [B, C, H, W] = [B, 1, 128, 128]
+        enc_result = self.encoder(input) # [B, H*W, C] = [B, 16*16, 300]
         dec_result = self.decoder(
             enc_result,
             expected[:, :-1],
