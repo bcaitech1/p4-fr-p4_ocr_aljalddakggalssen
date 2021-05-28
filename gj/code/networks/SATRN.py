@@ -7,7 +7,7 @@ import random
 
 from dataset import START, PAD
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class BottleneckBlock(nn.Module):
@@ -460,6 +460,7 @@ class TransformerDecoder(nn.Module):
         dropout_rate,
         pad_id,
         st_id,
+        device,
         layer_num=1,
         checkpoint=None,
     ):
@@ -487,6 +488,7 @@ class TransformerDecoder(nn.Module):
 
         self.pad_id = pad_id
         self.st_id = st_id
+        self.device = device
 
         if checkpoint is not None:
             self.load_state_dict(checkpoint)
@@ -500,7 +502,7 @@ class TransformerDecoder(nn.Module):
 
     def order_mask(self, length):
         order_mask = torch.triu(torch.ones(length, length), diagonal=1).bool()
-        order_mask = order_mask.unsqueeze(0).to(device)
+        order_mask = order_mask.unsqueeze(0).to(self.device)
         return order_mask
 
     def text_embedding(self, texts):
@@ -523,7 +525,7 @@ class TransformerDecoder(nn.Module):
         else:
             out = []
             num_steps = batch_max_length - 1
-            target = torch.LongTensor(src.size(0)).fill_(self.st_id).to(device) # [START] token
+            target = torch.LongTensor(src.size(0)).fill_(self.st_id).to(self.device) # [START] token
             features = [None] * self.layer_num
 
             for t in range(num_steps):
@@ -543,7 +545,7 @@ class TransformerDecoder(nn.Module):
                 target = target.squeeze()   # [b]
                 out.append(_out)
             
-            out = torch.stack(out, dim=1).to(device)    # [b, max length, 1, class length]
+            out = torch.stack(out, dim=1).to(self.device)    # [b, max length, 1, class length]
             out = out.squeeze(2)    # [b, max length, class length]
 
         return out
@@ -560,7 +562,6 @@ class SATRN(nn.Module):
             head_num=FLAGS.SATRN.encoder.head_num,
             layer_num=FLAGS.SATRN.encoder.layer_num,
             dropout_rate=FLAGS.dropout_rate,
-            device=device,
         )
 
         self.decoder = TransformerDecoder(

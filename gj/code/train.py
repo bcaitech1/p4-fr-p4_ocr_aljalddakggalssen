@@ -199,7 +199,7 @@ def main(config_file):
     """
     Train math formula recognition model
     """
-    options = Flags(config_file).get()
+    options, origin_config = Flags(config_file).get()
 
     #set random seed
     torch.manual_seed(options.seed)
@@ -320,7 +320,7 @@ def main(config_file):
         options.print_epochs = options.num_epochs
 
     # Wandb or Tensorboard
-    writer = init_logging(options, model)
+    writer = init_logging(options, model, origin_config)
 
     start_epoch = checkpoint["epoch"]
     train_symbol_accuracy = checkpoint["train_symbol_accuracy"]
@@ -396,7 +396,7 @@ def main(config_file):
             options.teacher_forcing_ratio,
             options.max_grad_norm,
             device,
-            use_amp=options.use_amp,
+            use_amp=options.use_amp and device.type == 'cuda',
             train=False,
         )
         validation_losses.append(validation_result["loss"])
