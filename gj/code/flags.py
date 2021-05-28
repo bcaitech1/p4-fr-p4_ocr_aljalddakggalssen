@@ -4,12 +4,13 @@ Original code from clovaai/SATRN
 import os
 import yaml
 import collections
+from copy import deepcopy
 
 
 def dict_to_namedtuple(d):
     """ Convert dictionary to named tuple.
     """
-    FLAGSTuple = collections.namedtuple('FLAGS', sorted(d.keys()))
+    FLAGSTuple = collections.namedtuple('FLAGS', sorted(d.keys()) + ['original_config'])
 
     for k, v in d.items():
         
@@ -24,6 +25,8 @@ def dict_to_namedtuple(d):
                 d[k] = eval(v)
             except:
                 d[k] = v
+
+    d['original_config'] = d
 
     nt = FLAGSTuple(**d)
 
@@ -41,8 +44,9 @@ class Flags:
         except:
             d = config_file
 
-
+        self.d = deepcopy(d)
         self.flags = dict_to_namedtuple(d)
+        
 
     def get(self):
-        return self.flags
+        return self.flags, self.d

@@ -3,6 +3,8 @@ import torch
 from tensorboardX import SummaryWriter
 import wandb
 
+from flatten_dict import flatten
+
 use_cuda = torch.cuda.is_available()
 
 default_checkpoint = {
@@ -43,7 +45,7 @@ def load_checkpoint(path, cuda=use_cuda):
         # Load GPU model on CPU
         return torch.load(path, map_location=lambda storage, loc: storage)
 
-def init_logging(options, model):
+def init_logging(options, model, origin_config):
     if options.use_log_type is None:
         return None
 
@@ -58,7 +60,8 @@ def init_logging(options, model):
 
         wandb.init(project=options.wandb.project,
                 entity=options.wandb.entity,
-               tags=options.wandb.tags, name=name)
+               tags=options.wandb.tags, name=name,
+               config=flatten(origin_config, reducer='path'))
         wandb.watch(model)
         return None
     else:

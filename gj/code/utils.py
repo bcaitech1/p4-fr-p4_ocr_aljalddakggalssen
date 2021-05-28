@@ -7,6 +7,7 @@ from adamp import (
 from scheduler import CircularLRBeta
 
 from networks.Attention import Attention
+from networks.SATRN import SATRN
 
 
 def get_network(
@@ -21,6 +22,9 @@ def get_network(
     if model_type == "Attention":
         model = Attention(FLAGS, train_dataset, checkpoint=model_checkpoint,
              device=device).to(device)
+    elif model_type == "SATRN":
+        model = SATRN(FLAGS, train_dataset, checkpoint=model_checkpoint,
+         device=device).to(device)
     else:
         raise NotImplementedError
 
