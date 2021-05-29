@@ -83,6 +83,7 @@ def run_epoch(
         model.eval()
 
     losses = []
+    total_inputs = 0
     # grad_norms = []
     correct_symbols = 0
     total_symbols = 0
@@ -156,15 +157,16 @@ def run_epoch(
                     enc_lr_scheduler.step()
                     dec_lr_scheduler.step()
 
-            losses.append(loss.item())
-            
+            losses.append(loss.item() * len(input))
+            total_inputs += len(input)
+
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
             expected_str = id_to_string(expected, data_loader,do_eval=1)
             sequence_str = id_to_string(sequence, data_loader,do_eval=1)
             wer += word_error_rate(sequence_str,expected_str)
-            num_wer += 1
+            num_wer += len(expected_str)
             sent_acc += sentence_acc(sequence_str,expected_str)
-            num_sent_acc += 1
+            num_sent_acc += len(expected_str)
             correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
             total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
 
@@ -178,7 +180,7 @@ def run_epoch(
     print(*sequence[:3], sep="\n")
 
     result = {
-        "loss": np.mean(losses),
+        "loss": np.sum(losses) / total_inputs,
         "correct_symbols": correct_symbols,
         "total_symbols": total_symbols,
         "wer": wer,
