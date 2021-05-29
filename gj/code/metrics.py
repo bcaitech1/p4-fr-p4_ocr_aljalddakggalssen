@@ -9,7 +9,7 @@ def word_error_rate(predicted_outputs, ground_truths):
 		distance = editdistance.eval(output, ground_truth)
 		length = max(len(output),len(ground_truth))
 		sum_wer+=(distance/length)
-	return sum_wer/len(predicted_outputs)
+	return sum_wer
 
 
 def sentence_acc(predicted_outputs, ground_truths):
@@ -17,5 +17,5 @@ def sentence_acc(predicted_outputs, ground_truths):
 	for output,ground_truth in zip(predicted_outputs,ground_truths):
 		if np.array_equal(output,ground_truth):
 			correct_sentences+=1
-	return correct_sentences/len(predicted_outputs)
+	return correct_sentences
 
