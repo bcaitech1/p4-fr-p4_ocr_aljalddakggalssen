@@ -417,7 +417,7 @@ def main(config_file):
         # Save checkpoint
         #make config
 
-        new_metric = validation_epoch_sentence_accuracy * 0.9 + validation_epoch_wer * 0.1
+        new_metric = validation_epoch_sentence_accuracy * 0.9 + (1-validation_epoch_wer) * 0.1
         best_changed = False
         if best_metric <= new_metric:
             best_metric = new_metric
