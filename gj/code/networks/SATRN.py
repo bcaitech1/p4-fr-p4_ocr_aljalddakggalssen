@@ -280,17 +280,35 @@ class TransformerEncoderLayer(nn.Module):
 
 
 class PositionalEncoding2D(nn.Module):
-    def __init__(self, in_channels, device, max_h=512, max_w=512, dropout=0.1):
+    def __init__(self, in_channels, device, max_h=512, max_w=512, dropout=0.1,
+        use_adaptive_2d_encoding=False):
         super(PositionalEncoding2D, self).__init__()
 
         self.h_position_encoder = self.generate_encoder(in_channels // 2, max_h)
         self.w_position_encoder = self.generate_encoder(in_channels // 2, max_w)
 
-        self.h_linear = nn.Linear(in_channels // 2, in_channels // 2)
-        self.w_linear = nn.Linear(in_channels // 2, in_channels // 2)
+        if use_adaptive_2d_encoding:
+            self.h_adaptive_layer = nn.Sequential(
+                nn.Linear(in_channels // 2, in_channels // 2),
+                nn.ReLU(),
+                nn.Linear(in_channels // 2, in_channels // 2),
+                nn.Sigmoid(),
+            )
 
+            self.w_adaptive_layer = nn.Sequential(
+                nn.Linear(in_channels // 2, in_channels // 2),
+                nn.ReLU(),
+                nn.Linear(in_channels // 2, in_channels // 2),
+                nn.Sigmoid(),
+            )
+        else:
+            self.h_linear = nn.Linear(in_channels // 2, in_channels // 2)
+            self.w_linear = nn.Linear(in_channels // 2, in_channels // 2)
+
+        self.D = in_channels // 2
         self.dropout = nn.Dropout(p=dropout)
         self.device = device
+        self.use_adaptive_2d_encoding = use_adaptive_2d_encoding
 
     def generate_encoder(self, in_channels, max_len):
         pos = torch.arange(max_len).float().unsqueeze(1)
@@ -307,21 +325,40 @@ class PositionalEncoding2D(nn.Module):
         h_pos_encoding = (
             self.h_position_encoder[:h, :].unsqueeze(1).to(self.device)
         ) # H 1 D
-        h_pos_encoding = self.h_linear(h_pos_encoding)  # [H, 1, D]
 
         w_pos_encoding = (
             self.w_position_encoder[:w, :].unsqueeze(0).to(self.device)
         )
-        w_pos_encoding = self.w_linear(w_pos_encoding)  # [1, W, D]
 
-        h_pos_encoding = h_pos_encoding.expand(-1, w, -1)   # h, w, c/2
-        w_pos_encoding = w_pos_encoding.expand(h, -1, -1)   # h, w, c/2
+        if self.use_adaptive_2d_encoding:
+            ge = torch.mean(input, dim=(-1, -2)) # [B, 2*D]
+            ge_h = ge[:, :self.D] # [B, D]
+            ge_w = ge[:, self.D:] # [B, D]
 
-        pos_encoding = torch.cat([h_pos_encoding, w_pos_encoding], dim=2)  # [H, W, 2*D]
+            alpha_e = self.h_adaptive_layer(ge_h).view(b, 1, 1, -1) # [B, 1, 1, D]
+            beta_e = self.w_adaptive_layer(ge_w).view(b, 1, 1, -1) # [B, 1, 1, D]
+            h_pos_encoding = alpha_e * h_pos_encoding.unsqueeze(0)  # [B, H, 1, D]
+            w_pos_encoding = beta_e * w_pos_encoding.unsqueeze(0)  # [B, 1, W, D]
 
-        pos_encoding = pos_encoding.permute(2, 0, 1)  # [2*D, H, W]
+            h_pos_encoding = h_pos_encoding.expand(-1, -1, w, -1)   # [B, H, W, D]
+            w_pos_encoding = w_pos_encoding.expand(-1, h, -1, -1)   # [B, H, W, D]
 
-        out = input + pos_encoding.unsqueeze(0)
+            pos_encoding = torch.cat([h_pos_encoding, w_pos_encoding], dim=-1)  # [B, H, W, 2*D]
+
+            pos_encoding = pos_encoding.permute(0, 3, 1, 2)  # [B, 2*D, H, W]
+        else:
+            h_pos_encoding = self.h_linear(h_pos_encoding)  # [H, 1, D]
+            w_pos_encoding = self.w_linear(w_pos_encoding)  # [1, W, D]
+
+            h_pos_encoding = h_pos_encoding.expand(-1, w, -1)   # h, w, c/2
+            w_pos_encoding = w_pos_encoding.expand(h, -1, -1)   # h, w, c/2
+
+            pos_encoding = torch.cat([h_pos_encoding, w_pos_encoding], dim=2)  # [H, W, 2*D]
+
+            pos_encoding = pos_encoding.permute(2, 0, 1)  # [2*D, H, W]
+            pos_encoding = pos_encoding.unsqueeze(0) # [1, 2*D, H, W]
+
+        out = input + pos_encoding # [B, 2*D, H, W]
         out = self.dropout(out)
 
         return out
@@ -345,6 +382,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         device,
         dropout_rate=0.1,
         checkpoint=None,
+        use_adaptive_2d_encoding=False
     ):
         super(TransformerEncoderFor2DFeatures, self).__init__()
 
@@ -354,7 +392,8 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             output_channel=hidden_dim,
             dropout_rate=dropout_rate,
         )
-        self.positional_encoding = PositionalEncoding2D(hidden_dim, device=device)
+        self.positional_encoding = PositionalEncoding2D(hidden_dim, device=device,
+            use_adaptive_2d_encoding=use_adaptive_2d_encoding)
         self.attention_layers = nn.ModuleList(
             [
                 TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate)
@@ -573,6 +612,7 @@ class SATRN(nn.Module):
             layer_num=FLAGS.SATRN.encoder.layer_num,
             dropout_rate=FLAGS.dropout_rate,
             device=device,
+            use_adaptive_2d_encoding=FLAGS.SATRN.use_adaptive_2d_encoding,
         )
 
         self.decoder = TransformerDecoder(
