@@ -255,13 +255,20 @@ def main(config_file):
         )
 
     # Get data
-    transformed = transforms.Compose(
-        [
-            # Resize so all images have the same size
-            transforms.Resize((options.input_size.height, options.input_size.width)),
-            transforms.ToTensor(),
-        ]
-    )
+    if options.data.flexible_image_size:
+        transformed = transforms.Compose(
+            [
+                transforms.ToTensor(),
+            ]
+        )
+    else:
+        transformed = transforms.Compose(
+            [
+                transforms.Resize((options.input_size.height, options.input_size.width)),
+                transforms.ToTensor(),
+            ]
+        )
+
     train_data_loader, validation_data_loader, train_dataset, valid_dataset = dataset_loader(options, transformed)
     print(
         "[+] Data\n",

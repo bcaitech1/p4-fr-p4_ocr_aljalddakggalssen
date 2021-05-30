@@ -280,7 +280,7 @@ class TransformerEncoderLayer(nn.Module):
 
 
 class PositionalEncoding2D(nn.Module):
-    def __init__(self, in_channels, device, max_h=64, max_w=128, dropout=0.1):
+    def __init__(self, in_channels, device, max_h=512, max_w=512, dropout=0.1):
         super(PositionalEncoding2D, self).__init__()
 
         self.h_position_encoder = self.generate_encoder(in_channels // 2, max_h)
@@ -535,7 +535,7 @@ class TransformerDecoder(nn.Module):
         else:
             out = []
             num_steps = batch_max_length - 1
-            target = torch.LongTensor(src.size(0)).fill_(self.st_id).to(self.device) # [START] token
+            target = torch.LongTensor(src.size(0)).view(-1).fill_(self.st_id).to(self.device) # [START] token
             features = [None] * self.layer_num
 
             for t in range(num_steps):
@@ -552,7 +552,7 @@ class TransformerDecoder(nn.Module):
 
                 _out = self.generator(tgt)  # [b, 1, c]
                 target = torch.argmax(_out[:, -1:, :], dim=-1)  # [b, 1]
-                target = target.squeeze()   # [b]
+                target = target.squeeze(-1)   # [b]
                 out.append(_out)
             
             out = torch.stack(out, dim=1).to(self.device)    # [b, max length, 1, class length]

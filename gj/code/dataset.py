@@ -1,10 +1,17 @@
 import csv
 import os
 import random
+import math
+from collections import defaultdict
+import numpy as np
 import torch
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
+from torch.utils.data import Sampler
+
+from tqdm.auto import trange, tqdm
+from torchvision import transforms
 
 START = "<SOS>"
 END = "<EOS>"
@@ -55,6 +62,67 @@ def split_gt(groundtruth, proportion=1.0, test_percent=None):
     else:
         return data
 
+class SizeBatchSampler(Sampler):
+    def __init__(self, data_source, batch_size, is_random=True):
+        super().__init__(data_source=data_source)
+        self.batch_size = batch_size
+        self.is_random = is_random
+
+        self.bucket_dict = defaultdict(list)
+
+        for i in trange(len(data_source)):
+            h, w = data_source.get_shape(i)
+            self.bucket_dict[w].append(i)
+
+        for k in self.bucket_dict:
+            self.bucket_dict[k] = np.array(self.bucket_dict[k])
+        
+        self.len = 0
+        self.total_cnt = {}
+        for k, v in self.bucket_dict.items():
+            cur_len = (len(v) + self.batch_size - 1) // self.batch_size
+            self.len += cur_len
+            self.total_cnt[k] = cur_len
+
+    def __iter__(self):
+        if self.is_random:
+            for k, v in self.bucket_dict.items():
+                np.random.shuffle(v)
+
+        ordered_keys = []
+        self.keys2idx = {}
+        self.current_cnt = {}
+        idx = 0
+        for k in self.bucket_dict:
+            self.current_cnt[k] = 0
+            ordered_keys.append(k)
+            self.keys2idx[k] = idx
+            idx += 1
+
+        self.ordered_keys = np.array(ordered_keys)
+        self.keys_prob = np.ones_like(self.ordered_keys)
+
+        self.left = len(self.bucket_dict)
+
+        return self
+
+    def __next__(self):
+        if self.left > 0:
+            cur_bucket = np.random.choice(self.ordered_keys, p=self.keys_prob/self.keys_prob.sum())
+            idx = self.current_cnt[cur_bucket]
+            cur_idxs = self.bucket_dict[cur_bucket][self.batch_size * idx : self.batch_size * (idx + 1)]
+
+            self.current_cnt[cur_bucket] += 1
+            if self.current_cnt[cur_bucket] == self.total_cnt[cur_bucket]:
+                self.keys_prob[self.keys2idx[cur_bucket]] = 0
+                self.left -= 1
+
+            return cur_idxs
+        else:
+            raise StopIteration
+
+    def __len__(self):
+        return self.len
 
 def collate_batch(data):
     max_len = max([len(d["truth"]["encoded"]) for d in data])
@@ -99,6 +167,8 @@ class LoadDataset(Dataset):
         crop=False,
         transform=None,
         rgb=3,
+        max_resolution=128*128,
+        is_flexible=False,
     ):
         """
         Args:
@@ -129,6 +199,11 @@ class LoadDataset(Dataset):
             for p, truth in groundtruth
         ]
 
+        self.is_flexible = is_flexible
+        if self.is_flexible:
+            self.shape_cache = np.zeros((len(self), 2), dtype=np.int)
+            self.max_resolution = max_resolution
+
     def __len__(self):
         return len(self.data)
 
@@ -151,7 +226,29 @@ class LoadDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
+        if self.is_flexible:
+            image = transforms.Resize(self.get_shape(i))(image)
+
         return {"path": item["path"], "truth": item["truth"], "image": image}
+
+    def get_shape(self, i):
+        h, w = self.shape_cache[i]
+        if h == 0 and w == 0:
+            item = self.data[i]
+            image = Image.open(item["path"])
+            rw, rh = image.size
+
+            T = self.max_resolution
+            div = rw * rh / T
+            w = round(rw/math.sqrt(div))
+            h = round(rh/math.sqrt(div))
+            w = round(w / 32) * 32
+            h = T // w
+            # h = (T // w) // 32 * 32
+
+            self.shape_cache[i][0] = h
+            self.shape_cache[i][1] = w
+        return h, w
 
 class LoadEvalDataset(Dataset):
     """Load Dataset"""
@@ -267,25 +364,51 @@ def dataset_loader(options, transformed):
         print(f'Valid: {old_valid_len} -> {len(valid_data)}')
 
     train_dataset = LoadDataset(
-        train_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb
-    )
-    train_data_loader = DataLoader(
-        train_dataset,
-        batch_size=options.batch_size,
-        shuffle=True,
-        num_workers=options.num_workers,
-        collate_fn=collate_batch,
+        train_data, options.data.token_paths, crop=options.data.crop,
+        transform=transformed, rgb=options.data.rgb,
+        max_resolution=options.input_size.height * options.input_size.width,
+        is_flexible=options.data.flexible_image_size,
     )
 
     valid_dataset = LoadDataset(
-        valid_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb
+        valid_data, options.data.token_paths, crop=options.data.crop,
+        transform=transformed, rgb=options.data.rgb,
+        max_resolution=options.input_size.height * options.input_size.width,
+        is_flexible=options.data.flexible_image_size,
     )
-    valid_data_loader = DataLoader(
-        valid_dataset,
-        batch_size=options.batch_size,
-        shuffle=False,
-        num_workers=options.num_workers,
-        collate_fn=collate_batch,
-    )
+
+    if options.data.flexible_image_size:
+        train_sampler = SizeBatchSampler(train_dataset, options.batch_size, is_random=True)
+        train_data_loader = DataLoader(
+            train_dataset,
+            batch_sampler=train_sampler,
+            num_workers=options.num_workers,
+            collate_fn=collate_batch,
+        )
+
+        valid_sampler = SizeBatchSampler(valid_dataset, options.batch_size, is_random=False)
+        valid_data_loader = DataLoader(
+            valid_dataset,
+            batch_sampler=valid_sampler,
+            num_workers=options.num_workers,
+            collate_fn=collate_batch,
+        )
+    else:
+        train_data_loader = DataLoader(
+            train_dataset,
+            batch_size=options.batch_size,
+            shuffle=True,
+            num_workers=options.num_workers,
+            collate_fn=collate_batch,
+        )
+
+        valid_data_loader = DataLoader(
+            valid_dataset,
+            batch_size=options.batch_size,
+            shuffle=False,
+            num_workers=options.num_workers,
+            collate_fn=collate_batch,
+        )
+
     print()
     return train_data_loader, valid_data_loader, train_dataset, valid_dataset
