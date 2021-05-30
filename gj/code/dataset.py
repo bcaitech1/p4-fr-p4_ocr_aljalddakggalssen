@@ -261,6 +261,8 @@ class LoadEvalDataset(Dataset):
         crop=False,
         transform=None,
         rgb=3,
+        max_resolution=128*128,
+        is_flexible=False,
     ):
         """
         Args:
@@ -293,6 +295,11 @@ class LoadEvalDataset(Dataset):
             for p, p1,truth in groundtruth
         ]
 
+        self.is_flexible = is_flexible
+        if self.is_flexible:
+            self.shape_cache = np.zeros((len(self), 2), dtype=np.int)
+            self.max_resolution = max_resolution
+
     def __len__(self):
         return len(self.data)
 
@@ -315,7 +322,29 @@ class LoadEvalDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
+        if self.is_flexible:
+            image = transforms.Resize(self.get_shape(i))(image)
+
         return {"path": item["path"], "file_path":item["file_path"],"truth": item["truth"], "image": image}
+
+    def get_shape(self, i):
+        h, w = self.shape_cache[i]
+        if h == 0 and w == 0:
+            item = self.data[i]
+            image = Image.open(item["path"])
+            rw, rh = image.size
+
+            T = self.max_resolution
+            div = rw * rh / T
+            w = round(rw/math.sqrt(div))
+            h = round(rh/math.sqrt(div))
+            w = round(w / 32) * 32
+            h = T // w
+            # h = (T // w) // 32 * 32
+
+            self.shape_cache[i][0] = h
+            self.shape_cache[i][1] = w
+        return h, w
 
 def dataset_loader(options, transformed):
     print("[+] Data Loading")

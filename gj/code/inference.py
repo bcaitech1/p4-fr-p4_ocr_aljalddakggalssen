@@ -39,12 +39,19 @@ def main(parser):
         )
     print(options.input_size.height)
 
-    transformed = transforms.Compose(
-        [
-            transforms.Resize((options.input_size.height, options.input_size.width)),
-            transforms.ToTensor(),
-        ]
-    )
+    if options.data.flexible_image_size:
+        transformed = transforms.Compose(
+            [
+                transforms.ToTensor(),
+            ]
+        )
+    else:
+        transformed = transforms.Compose(
+            [
+                transforms.Resize((options.input_size.height, options.input_size.width)),
+                transforms.ToTensor(),
+            ]
+        )
 
     dummy_gt = "\sin " * parser.max_sequence  # set maximum inference sequence
 
@@ -55,15 +62,27 @@ def main(parser):
     test_data = [[os.path.join(root, x[0]), x[0], dummy_gt] for x in data]
     test_dataset = LoadEvalDataset(
         test_data, checkpoint["token_to_id"], checkpoint["id_to_token"], crop=False, transform=transformed,
-        rgb=options.data.rgb
+        rgb=options.data.rgb,
+        max_resolution=options.input_size.height * options.input_size.width,
+        is_flexible=options.data.flexible_image_size,
     )
-    test_data_loader = DataLoader(
-        test_dataset,
-        batch_size=parser.batch_size,
-        shuffle=False,
-        num_workers=options.num_workers,
-        collate_fn=collate_eval_batch,
-    )
+
+    if options.data.flexible_image_size:
+        test_sampler = SizeBatchSampler(test_dataset, options.batch_size, is_random=False)
+        test_data_loader = DataLoader(
+            test_dataset,
+            batch_sampler=test_sampler,
+            num_workers=options.num_workers,
+            collate_fn=collate_eval_batch,
+        )
+    else:
+        test_data_loader = DataLoader(
+            test_dataset,
+            batch_size=parser.batch_size,
+            shuffle=False,
+            num_workers=options.num_workers,
+            collate_fn=collate_eval_batch,
+        )
 
     print(
         "[+] Data\n",
@@ -78,7 +97,7 @@ def main(parser):
         test_dataset,
     )
     model.eval()
-    results = []
+    results = {}
     for d in tqdm(test_data_loader):
         input = d["image"].to(device)
         expected = d["truth"]["encoded"].to(device)
@@ -93,7 +112,9 @@ def main(parser):
 
     os.makedirs(parser.output_dir, exist_ok=True)
     with open(os.path.join(parser.output_dir, "output.csv"), "w") as w:
-        for path, predicted in results:
+        for i in range(len(test_dataset)):
+            path = test_dataset[i]['file_path']
+            predicted = results[path]
             w.write(path + "\t" + predicted + "\n")
 
 
