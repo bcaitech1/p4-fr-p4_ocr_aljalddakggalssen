@@ -7,7 +7,7 @@ from train import id_to_string
 from metrics import word_error_rate, sentence_acc
 from checkpoint import load_checkpoint
 from torchvision import transforms
-from dataset import LoadEvalDataset, collate_eval_batch, START, PAD
+from dataset import LoadEvalDataset, collate_eval_batch, START, PAD, SizeBatchSampler
 from flags import Flags
 from utils import get_network, get_optimizer
 import csv
@@ -102,13 +102,16 @@ def main(parser):
         input = d["image"].to(device)
         expected = d["truth"]["encoded"].to(device)
 
-        output = model(input, expected, False, 0.0)
+        if hasattr(options.SATRN, 'solve_extra_pb'):
+            output, _, _ = model(input, expected, False, 0.0)
+        else:
+            output = model(input, expected, False, 0.0)
         decoded_values = output.transpose(1, 2)
         _, sequence = torch.topk(decoded_values, 1, dim=1)
         sequence = sequence.squeeze(1)
         sequence_str = id_to_string(sequence, test_data_loader, do_eval=1)
         for path, predicted in zip(d["file_path"], sequence_str):
-            results.append((path, predicted))
+            results[path] =  predicted
 
     os.makedirs(parser.output_dir, exist_ok=True)
     with open(os.path.join(parser.output_dir, "output.csv"), "w") as w:
@@ -123,7 +126,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint",
         dest="checkpoint",
-        default="./log/satrn/checkpoints/0015.pth",
+        default="/opt/ml/team/gj/code/log/satrn_pb_test/checkpoints/best.pth",
         type=str,
         help="Path of checkpoint file",
     )

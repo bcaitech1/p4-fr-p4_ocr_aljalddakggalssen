@@ -382,7 +382,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         device,
         dropout_rate=0.1,
         checkpoint=None,
-        use_adaptive_2d_encoding=False
+        use_adaptive_2d_encoding=False,
     ):
         super(TransformerEncoderFor2DFeatures, self).__init__()
 
@@ -400,6 +400,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
                 for _ in range(layer_num)
             ]
         )
+
         if checkpoint is not None:
             self.load_state_dict(checkpoint)
 
@@ -604,6 +605,10 @@ class SATRN(nn.Module):
     def __init__(self, FLAGS, train_dataset, device, checkpoint=None):
         super(SATRN, self).__init__()
 
+        if not hasattr(FLAGS.SATRN, 'use_adaptive_2d_encoding'):
+            use_adaptive_2d_encoding = False
+        else:
+            use_adaptive_2d_encoding = FLAGS.SATRN.use_adaptive_2d_encoding
         self.encoder = TransformerEncoderFor2DFeatures(
             input_size=FLAGS.data.rgb,
             hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
@@ -612,7 +617,7 @@ class SATRN(nn.Module):
             layer_num=FLAGS.SATRN.encoder.layer_num,
             dropout_rate=FLAGS.dropout_rate,
             device=device,
-            use_adaptive_2d_encoding=FLAGS.SATRN.use_adaptive_2d_encoding,
+            use_adaptive_2d_encoding=use_adaptive_2d_encoding,
         )
 
         self.decoder = TransformerDecoder(
@@ -628,9 +633,31 @@ class SATRN(nn.Module):
             device=device,
         )
 
-        self.criterion = (
-            nn.CrossEntropyLoss()
-        )  # without ignore_index=train_dataset.token_to_id[PAD]
+        if not hasattr(FLAGS.SATRN, 'solve_extra_pb'):
+            solve_extra_pb = False
+        else:
+            solve_extra_pb = FLAGS.SATRN.solve_extra_pb
+        self.solve_extra_pb = solve_extra_pb
+        if self.solve_extra_pb:
+            self.level_classifer = nn.Sequential(
+                nn.ReLU(),
+                nn.Linear(FLAGS.SATRN.encoder.hidden_dim, 5)
+            )
+
+            self.source_classifier = nn.Sequential(
+                nn.ReLU(),
+                nn.Linear(FLAGS.SATRN.encoder.hidden_dim, 2)
+            )
+
+            self.criterion = (
+                nn.CrossEntropyLoss(),
+                nn.CrossEntropyLoss(),
+                nn.CrossEntropyLoss(),
+            ) 
+        else:
+            self.criterion = (
+                nn.CrossEntropyLoss()
+            )  # without ignore_index=train_dataset.token_to_id[PAD]
 
         if checkpoint:
             self.load_state_dict(checkpoint)
@@ -645,4 +672,11 @@ class SATRN(nn.Module):
             expected.size(1),
             teacher_forcing_ratio,
         )
-        return dec_result
+        if self.solve_extra_pb:
+            enc_mean = torch.mean(enc_result, dim=1) # [B, 300]
+            level_result = self.level_classifer(enc_mean) # [B, 5]
+            source_result = self.source_classifier(enc_mean) # [B, 5]
+            
+            return dec_result, level_result, source_result
+        else:
+            return dec_result

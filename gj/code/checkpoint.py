@@ -80,7 +80,13 @@ def log_stuff(
     validation_symbol_accuracy,
     validation_sentence_accuracy,
     validation_wer,
-    model
+    model,
+    train_total_loss=None,
+    train_level_loss=None,
+    train_source_loss=None,
+    validation_total_loss=None,
+    validation_level_loss=None,
+    validation_source_loss=None,
 ):
     if options.use_log_type is None:
         return None
@@ -103,6 +109,20 @@ def log_stuff(
             'validation_sentence_accuracy': validation_sentence_accuracy,
             'validation_wer': validation_wer,
         }
+
+        if train_total_loss is not None:
+            logging_stuff['train_total_loss'] = train_total_loss
+        if train_level_loss is not None:
+            logging_stuff['train_level_loss'] = train_level_loss
+        if train_source_loss is not None:
+            logging_stuff['train_source_loss'] = train_source_loss
+
+        if validation_total_loss is not None:
+            logging_stuff['validation_total_loss'] = validation_total_loss
+        if validation_level_loss is not None:
+            logging_stuff['validation_level_loss'] = validation_level_loss
+        if validation_source_loss is not None:
+            logging_stuff['validation_source_loss'] = validation_source_loss
 
         wandb.log(logging_stuff, step=epoch)
     else:

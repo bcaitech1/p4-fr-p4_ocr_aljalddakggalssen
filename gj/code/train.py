@@ -71,6 +71,7 @@ def run_epoch(
     teacher_forcing_ratio,
     max_grad_norm,
     device,
+    options,
     use_amp=False,
     train=True,
 ):
@@ -82,6 +83,10 @@ def run_epoch(
     else:
         model.eval()
 
+    if options.SATRN.solve_extra_pb:
+        losses_satrn = []
+        losses_level = []
+        losses_source = []
     losses = []
     total_inputs = 0
     # grad_norms = []
@@ -104,18 +109,29 @@ def run_epoch(
             # The last batch may not be a full batch
             curr_batch_size = len(input)
             expected = d["truth"]["encoded"].to(device)
+            levels_expected = d['level'].to(device)
+            sources_expected = d['source'].to(device)
 
             # Replace -1 with the PAD token
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
 
             with autocast(enabled=use_amp):
-                output = model(input, expected, train, teacher_forcing_ratio)
-            
-                decoded_values = output.transpose(1, 2)
-                _, sequence = torch.topk(decoded_values, 1, dim=1)
-                sequence = sequence.squeeze(1)
-                
-                loss = criterion(decoded_values, expected[:, 1:])
+                if options.SATRN.solve_extra_pb:
+                    output, level_result, source_result = \
+                        model(input, expected, train, teacher_forcing_ratio)
+                    decoded_values = output.transpose(1, 2)
+                    _, sequence = torch.topk(decoded_values, 1, dim=1)
+                    sequence = sequence.squeeze(1)
+                    loss_satrn = criterion[0](decoded_values, expected[:, 1:])
+                    loss_level = criterion[1](level_result, levels_expected)
+                    loss_source = criterion[2](source_result, sources_expected)
+                    loss = loss_satrn + loss_level + loss_source
+                else:
+                    output = model(input, expected, train, teacher_forcing_ratio)
+                    decoded_values = output.transpose(1, 2)
+                    _, sequence = torch.topk(decoded_values, 1, dim=1)
+                    sequence = sequence.squeeze(1)
+                    loss = criterion(decoded_values, expected[:, 1:])
 
             if train:
                 enc_optim_params = [
@@ -157,7 +173,13 @@ def run_epoch(
                     enc_lr_scheduler.step()
                     dec_lr_scheduler.step()
 
-            losses.append(loss.item() * len(input))
+            if options.SATRN.solve_extra_pb:
+                losses.append(loss.item() * len(input))
+                losses_satrn.append(loss_satrn.item() * len(input))
+                losses_level.append(loss_level.item() * len(input))
+                losses_source.append(loss_source.item() * len(input))
+            else:
+                losses.append(loss.item() * len(input))
             total_inputs += len(input)
 
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
@@ -178,16 +200,31 @@ def run_epoch(
     print(*expected[:3], sep="\n")
     print("-" * 10 + "PR ({})".format("train" if train else "valid"))
     print(*sequence[:3], sep="\n")
+    
+    if options.SATRN.solve_extra_pb:
+        result = {
+            "loss": np.sum(losses_satrn) / total_inputs,
+            'loss_total': np.sum(losses) / total_inputs,
+            'loss_level': np.sum(losses_level) / total_inputs,
+            'loss_source': np.sum(losses_source) / total_inputs,
+            "correct_symbols": correct_symbols,
+            "total_symbols": total_symbols,
+            "wer": wer,
+            "num_wer":num_wer,
+            "sent_acc": sent_acc,
+            "num_sent_acc":num_sent_acc
+        }
+    else:
+        result = {
+            "loss": np.sum(losses) / total_inputs,
+            "correct_symbols": correct_symbols,
+            "total_symbols": total_symbols,
+            "wer": wer,
+            "num_wer":num_wer,
+            "sent_acc": sent_acc,
+            "num_sent_acc":num_sent_acc
+        }
 
-    result = {
-        "loss": np.sum(losses) / total_inputs,
-        "correct_symbols": correct_symbols,
-        "total_symbols": total_symbols,
-        "wer": wer,
-        "num_wer":num_wer,
-        "sent_acc": sent_acc,
-        "num_sent_acc":num_sent_acc
-    }
     # if train:
     #     try:
     #         result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
@@ -286,7 +323,12 @@ def main(config_file):
         train_dataset,
     )
     model.train()
-    criterion = model.criterion.to(device)
+
+    if options.SATRN.solve_extra_pb:
+        criterion = [x.to(device) for x in model.criterion]
+    else:
+        criterion = model.criterion.to(device)
+
     enc_params_to_optimise = [
         param for param in model.encoder.parameters() if param.requires_grad
     ]
@@ -335,6 +377,7 @@ def main(config_file):
     train_symbol_accuracy = checkpoint["train_symbol_accuracy"]
     train_sentence_accuracy=checkpoint["train_sentence_accuracy"]
     train_wer=checkpoint["train_wer"]
+    
     train_losses = checkpoint["train_losses"]
     validation_symbol_accuracy = checkpoint["validation_symbol_accuracy"]
     validation_sentence_accuracy=checkpoint["validation_sentence_accuracy"]
@@ -368,6 +411,7 @@ def main(config_file):
             options.teacher_forcing_ratio,
             options.max_grad_norm,
             device,
+            options=options,
             use_amp=options.use_amp and device.type == 'cuda',
             train=True,
         )
@@ -405,6 +449,7 @@ def main(config_file):
             options.teacher_forcing_ratio,
             options.max_grad_norm,
             device,
+            options=options,
             use_amp=options.use_amp and device.type == 'cuda',
             train=False,
         )
@@ -495,21 +540,44 @@ def main(config_file):
             print(output_string)
             log_file.write(output_string + "\n")
 
-            log_stuff(
-                options,
-                writer,
-                start_epoch + epoch + 1,
-                # train_result["grad_norm"],
-                train_result["loss"],
-                train_epoch_symbol_accuracy,
-                train_epoch_sentence_accuracy,
-                train_epoch_wer,
-                validation_result["loss"],
-                validation_epoch_symbol_accuracy,
-                validation_epoch_sentence_accuracy,
-                validation_epoch_wer,
-                model,
-            )
+            if options.SATRN.solve_extra_pb:
+                log_stuff(
+                    options,
+                    writer,
+                    start_epoch + epoch + 1,
+                    # train_result["grad_norm"],
+                    train_result["loss"],
+                    train_epoch_symbol_accuracy,
+                    train_epoch_sentence_accuracy,
+                    train_epoch_wer,
+                    validation_result["loss"],
+                    validation_epoch_symbol_accuracy,
+                    validation_epoch_sentence_accuracy,
+                    validation_epoch_wer,
+                    model,
+                    train_total_loss=train_result['loss_total'],
+                    train_level_loss=train_result['loss_level'],
+                    train_source_loss=train_result['loss_source'],
+                    validation_total_loss=validation_result["loss_total"],
+                    validation_level_loss=validation_result["loss_level"],
+                    validation_source_loss=validation_result["loss_source"],
+                )
+            else:
+                log_stuff(
+                    options,
+                    writer,
+                    start_epoch + epoch + 1,
+                    # train_result["grad_norm"],
+                    train_result["loss"],
+                    train_epoch_symbol_accuracy,
+                    train_epoch_sentence_accuracy,
+                    train_epoch_wer,
+                    validation_result["loss"],
+                    validation_epoch_symbol_accuracy,
+                    validation_epoch_sentence_accuracy,
+                    validation_epoch_wer,
+                    model,
+                )
 
             if best_changed:
                 log_best_stuff(options, best_metric)
