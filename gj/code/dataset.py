@@ -62,6 +62,26 @@ def split_gt(groundtruth, proportion=1.0, test_percent=None):
     else:
         return data
 
+def load_levels(level_paths):
+    levels = {}
+    for level_file in level_paths:
+        with open(level_file, 'r') as fd:
+            tmp = [line.strip().split('\t') for line in fd.readlines()]
+            tmp = [(x, int(y)) for x, y in tmp]
+            for path, level in tmp:
+                levels[path] = level
+    return levels
+
+def load_sources(source_paths):
+    sources = {}
+    for source_file in source_paths:
+        with open(source_file, 'r') as fd:
+            tmp = [line.strip().split('\t') for line in fd.readlines()]
+            tmp = [(x, int(y)) for x, y in tmp]
+            for path, source in tmp:
+                sources[path] = source
+    return sources
+
 class SizeBatchSampler(Sampler):
     def __init__(self, data_source, batch_size, is_random=True):
         super().__init__(data_source=data_source)
@@ -138,6 +158,8 @@ def collate_batch(data):
             "text": [d["truth"]["text"] for d in data],
             "encoded": torch.tensor(padded_encoded)
         },
+        'level': torch.tensor([d['level'] for d in data], dtype=torch.long),
+        'source': torch.tensor([d['source'] for d in data], dtype=torch.long),
     }
 
 def collate_eval_batch(data):
@@ -164,6 +186,8 @@ class LoadDataset(Dataset):
         self,
         groundtruth,
         tokens_file,
+        levels,
+        sources,
         crop=False,
         transform=None,
         rgb=3,
@@ -199,10 +223,18 @@ class LoadDataset(Dataset):
             for p, truth in groundtruth
         ]
 
+        for datum in self.data:
+            file_path = datum['path'].split('/')[-1]
+            source = sources.get(file_path, -100) # -100 crossentory 무시 index
+            level = levels.get(file_path, -99) - 1 # -100 모름
+            datum['source'] = source
+            datum['level'] = level
+
         self.is_flexible = is_flexible
         if self.is_flexible:
             self.shape_cache = np.zeros((len(self), 2), dtype=np.int)
             self.max_resolution = max_resolution
+
 
     def __len__(self):
         return len(self.data)
@@ -229,7 +261,13 @@ class LoadDataset(Dataset):
         if self.is_flexible:
             image = transforms.Resize(self.get_shape(i))(image)
 
-        return {"path": item["path"], "truth": item["truth"], "image": image}
+        return {
+            "path": item["path"],
+            "truth": item["truth"],
+            "image": image,
+            'source': item['source'],
+            'level': item['level'],
+        }
 
     def get_shape(self, i):
         h, w = self.shape_cache[i]
@@ -392,15 +430,20 @@ def dataset_loader(options, transformed):
         print(f"Train: {old_train_len} -> {len(train_data)}")
         print(f'Valid: {old_valid_len} -> {len(valid_data)}')
 
+    levels = load_levels(options.data.level_paths)
+    sources = load_levels(options.data.source_paths)
+
     train_dataset = LoadDataset(
-        train_data, options.data.token_paths, crop=options.data.crop,
+        train_data, options.data.token_paths, sources=sources,
+        levels=levels, crop=options.data.crop,
         transform=transformed, rgb=options.data.rgb,
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
     )
 
     valid_dataset = LoadDataset(
-        valid_data, options.data.token_paths, crop=options.data.crop,
+        valid_data, options.data.token_paths, sources=sources,
+        levels=levels, crop=options.data.crop,
         transform=transformed, rgb=options.data.rgb,
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
