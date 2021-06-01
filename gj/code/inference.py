@@ -68,7 +68,7 @@ def main(parser):
     )
 
     if options.data.flexible_image_size:
-        test_sampler = SizeBatchSampler(test_dataset, options.batch_size, is_random=False)
+        test_sampler = SizeBatchSampler(test_dataset, parser.batch_size, is_random=False)
         test_data_loader = DataLoader(
             test_dataset,
             batch_sampler=test_sampler,
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint",
         dest="checkpoint",
-        default="/opt/ml/team/gj/code/log/satrn_pb_test/checkpoints/best.pth",
+        default="/opt/ml/team/gj/code/log/satrn_pb_test/checkpoints/best.pt",
         type=str,
         help="Path of checkpoint file",
     )
