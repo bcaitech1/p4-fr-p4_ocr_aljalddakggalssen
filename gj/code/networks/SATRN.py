@@ -249,12 +249,43 @@ class Feedforward(nn.Module):
             nn.Dropout(p=dropout),
         )
 
-    def forward(self, input):
+    def forward(self, input, h=0, w=0):
         return self.layers(input)
 
 
+class LocalityAwareFeedforward(nn.Module):
+    def __init__(self, filter_size=2048, hidden_dim=512, dropout=0.1):
+        super(LocalityAwareFeedforward, self).__init__()
+
+        self.layers = nn.Sequential( # [b, hidden_dim, h, w]
+            nn.Conv2d(hidden_dim, filter_size, 1, bias=False), # [b, filter, h, w]
+            nn.BatchNorm2d(filter_size),
+            nn.ReLU(True),
+            nn.Dropout(p=dropout),
+            nn.Conv2d(filter_size, filter_size, 3, stride=1, padding=1, bias=False), # [b, filter, h, w]
+            nn.BatchNorm2d(filter_size),
+            nn.ReLU(True),
+            nn.Dropout(p=dropout),
+            nn.Conv2d(filter_size, hidden_dim, 1, bias=False), # [b, hidden_dim, h, w]
+            nn.BatchNorm2d(hidden_dim),
+            nn.ReLU(True),
+            nn.Dropout(p=dropout),
+        )
+
+    def forward(self, input, h=0, w=0):
+        # [b, h * w, c]
+        b, _, c = input.shape
+        input = input.transpose(-1, -2).reshape(b, c, h, w) # [b, c, h, w]
+
+        out = self.layers(input) # [b, c, h, w]
+
+        out = out.reshape(b, c, h*w).transpose(-1, -2)
+        return out # [b, h * w, c]
+
+
 class TransformerEncoderLayer(nn.Module):
-    def __init__(self, input_size, filter_size, head_num, dropout_rate=0.2):
+    def __init__(self, input_size, filter_size, head_num, dropout_rate=0.2,
+        locality_aware_feedforward=False):
         super(TransformerEncoderLayer, self).__init__()
 
         self.attention_layer = MultiHeadAttention(
@@ -264,17 +295,23 @@ class TransformerEncoderLayer(nn.Module):
             dropout=dropout_rate,
         )
         self.attention_norm = nn.LayerNorm(normalized_shape=input_size)
-        self.feedforward_layer = Feedforward(
-            filter_size=filter_size, hidden_dim=input_size
-        )
+
+        self.locality_aware_feedforward = locality_aware_feedforward
+        if self.locality_aware_feedforward:
+            self.feedforward_layer = LocalityAwareFeedforward(
+                filter_size=filter_size, hidden_dim=input_size
+            )
+        else:
+            self.feedforward_layer = Feedforward(
+                filter_size=filter_size, hidden_dim=input_size
+            )
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
-    def forward(self, input):
-
+    def forward(self, input, h, w):
         att = self.attention_layer(input, input, input)
         out = self.attention_norm(att + input)
 
-        ff = self.feedforward_layer(out)
+        ff = self.feedforward_layer(out, h, w)
         out = self.feedforward_norm(ff + out)
         return out
 
@@ -288,17 +325,11 @@ class PositionalEncoding2D(nn.Module):
         self.w_position_encoder = self.generate_encoder(in_channels // 2, max_w)
 
         if use_adaptive_2d_encoding:
-            self.h_adaptive_layer = nn.Sequential(
-                nn.Linear(in_channels // 2, in_channels // 2),
+            self.alpha_layer = nn.Sequential(
+                nn.Linear(in_channels, in_channels//4),
                 nn.ReLU(),
-                nn.Linear(in_channels // 2, in_channels // 2),
-                nn.Sigmoid(),
-            )
-
-            self.w_adaptive_layer = nn.Sequential(
-                nn.Linear(in_channels // 2, in_channels // 2),
-                nn.ReLU(),
-                nn.Linear(in_channels // 2, in_channels // 2),
+                nn.Dropout(p=dropout),
+                nn.Linear(in_channels//4, in_channels),
                 nn.Sigmoid(),
             )
         else:
@@ -332,13 +363,15 @@ class PositionalEncoding2D(nn.Module):
 
         if self.use_adaptive_2d_encoding:
             ge = torch.mean(input, dim=(-1, -2)) # [B, 2*D]
-            ge_h = ge[:, :self.D] # [B, D]
-            ge_w = ge[:, self.D:] # [B, D]
 
-            alpha_e = self.h_adaptive_layer(ge_h).view(b, 1, 1, -1) # [B, 1, 1, D]
-            beta_e = self.w_adaptive_layer(ge_w).view(b, 1, 1, -1) # [B, 1, 1, D]
-            h_pos_encoding = alpha_e * h_pos_encoding.unsqueeze(0)  # [B, H, 1, D]
-            w_pos_encoding = beta_e * w_pos_encoding.unsqueeze(0)  # [B, 1, W, D]
+            alpha_together = self.alpha_layer(ge) # [B, 2*D]
+            alpha = alpha_together[:, :self.D] # [B, D]
+            beta = alpha_together[:, self.D:] # [B, D]
+
+            alpha = alpha.view(b, 1, 1, -1) # [B, 1, 1, D]
+            beta = beta.view(b, 1, 1, -1) # [B, 1, 1, D]
+            h_pos_encoding = alpha * h_pos_encoding.unsqueeze(0)  # [B, H, 1, D]
+            w_pos_encoding = beta * w_pos_encoding.unsqueeze(0)  # [B, 1, W, D]
 
             h_pos_encoding = h_pos_encoding.expand(-1, -1, w, -1)   # [B, H, W, D]
             w_pos_encoding = w_pos_encoding.expand(-1, h, -1, -1)   # [B, H, W, D]
@@ -383,6 +416,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         dropout_rate=0.1,
         checkpoint=None,
         use_adaptive_2d_encoding=False,
+        locality_aware_feedforward=False,
     ):
         super(TransformerEncoderFor2DFeatures, self).__init__()
 
@@ -396,7 +430,8 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             use_adaptive_2d_encoding=use_adaptive_2d_encoding)
         self.attention_layers = nn.ModuleList(
             [
-                TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate)
+                TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate,
+                    locality_aware_feedforward)
                 for _ in range(layer_num)
             ]
         )
@@ -416,7 +451,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
 
         for layer in self.attention_layers:
-            out = layer(out)
+            out = layer(out, h, w)
         return out # [b, h*w, c]
 
 
@@ -609,6 +644,12 @@ class SATRN(nn.Module):
             use_adaptive_2d_encoding = False
         else:
             use_adaptive_2d_encoding = FLAGS.SATRN.use_adaptive_2d_encoding
+
+        if not hasattr(FLAGS.SATRN, 'locality_aware_feedforward'):
+            locality_aware_feedforward = False
+        else:
+            locality_aware_feedforward = FLAGS.SATRN.locality_aware_feedforward
+
         self.encoder = TransformerEncoderFor2DFeatures(
             input_size=FLAGS.data.rgb,
             hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
@@ -618,6 +659,7 @@ class SATRN(nn.Module):
             dropout_rate=FLAGS.dropout_rate,
             device=device,
             use_adaptive_2d_encoding=use_adaptive_2d_encoding,
+            locality_aware_feedforward=locality_aware_feedforward,
         )
 
         self.decoder = TransformerDecoder(
