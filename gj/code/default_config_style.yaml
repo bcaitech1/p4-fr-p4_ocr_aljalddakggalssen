@@ -8,12 +8,16 @@ SATRN:
     filter_dim: 600
     layer_num: 6
     head_num: 8
+    use_tube: True
   decoder:
     src_dim: 300
     hidden_dim: 128
     filter_dim: 512
     layer_num: 3
     head_num: 8
+  use_adaptive_2d_encoding: True
+  solve_extra_pb: False
+  locality_aware_feedforward: True
 Attention:
   src_dim: 512
   hidden_dim: 128
@@ -25,7 +29,7 @@ log_dir: /opt/ml/team/gj/code/log
 
 
 ########################### NAME 
-prefix: satrn_flexible_size
+prefix: satrn_tube_enc_test
 
 data:
   train: # "/opt/ml/input/data/train_dataset/gt.txt"
@@ -52,6 +56,10 @@ data:
 
   token_paths:
     - "/opt/ml/input/data/train_dataset/tokens.txt"  # 241 tokens
+  source_paths:
+    - "/opt/ml/input/data/train_dataset/source.txt"
+  level_paths:
+    - "/opt/ml/input/data/train_dataset/level.txt"
   dataset_proportions:  # proportion of data to take from train (not test)
     - 1.0
   random_split: False # if True, random split from train files
@@ -59,7 +67,7 @@ data:
   crop: True
   rgb: 1    # 3 for color, 1 for greyscale
   flexible_image_size: True
-  use_small_data: False # {False |  True}
+  use_small_data: True # {False |  True}
 
 batch_size: 36
 num_workers: 8
@@ -67,7 +75,7 @@ num_epochs: 10
 print_epochs: 1
 save_type: best # no_save: dont save, best: save best 1
 use_amp: True
-device_pref: cuda # {cpu | cuda}
+device_pref: cpu # {cpu | cuda}
 dropout_rate: 0.1
 teacher_forcing_ratio: 0.5
 max_grad_norm: 2.0
@@ -92,7 +100,7 @@ wandb:
     - v0
     - ocr
     - 10ep
-    - flexible
+    - tube_enc
 
   ######################### NAME 
   name: null # null: use prefix instead

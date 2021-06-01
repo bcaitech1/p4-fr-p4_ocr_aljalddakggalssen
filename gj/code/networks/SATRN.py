@@ -7,6 +7,8 @@ import random
 
 from dataset import START, PAD
 
+from networks.TUBE import TUBEPosBias
+
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -174,9 +176,12 @@ class ScaledDotProductAttention(nn.Module):
         self.temperature = temperature
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k, v, mask=None, attn_bias=None):
 
         attn = torch.matmul(q, k.transpose(2, 3)) / self.temperature
+        if attn_bias is not None:
+            attn += attn_bias
+
         if mask is not None:
             attn = attn.masked_fill(mask=mask, value=float("-inf"))
         attn = torch.softmax(attn, dim=-1)
@@ -203,7 +208,7 @@ class MultiHeadAttention(nn.Module):
         self.out_linear = nn.Linear(self.head_num * self.head_dim, q_channels)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k, v, mask=None, attn_bias=None):
         b, q_len, k_len, v_len = q.size(0), q.size(1), k.size(1), v.size(1)
         q = (
             self.q_linear(q)
@@ -224,7 +229,7 @@ class MultiHeadAttention(nn.Module):
         if mask is not None:
             mask = mask.unsqueeze(1)
 
-        out, attn = self.attention(q, k, v, mask=mask)
+        out, attn = self.attention(q, k, v, mask=mask, attn_bias=attn_bias)
         out = (
             out.transpose(1, 2)
             .contiguous()
@@ -307,8 +312,9 @@ class TransformerEncoderLayer(nn.Module):
             )
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
-    def forward(self, input, h, w):
-        att = self.attention_layer(input, input, input)
+    def forward(self, input, h, w, attn_bias=None):
+        att = self.attention_layer(input, input, input,
+                attn_bias=attn_bias)
         out = self.attention_norm(att + input)
 
         ff = self.feedforward_layer(out, h, w)
@@ -350,7 +356,9 @@ class PositionalEncoding2D(nn.Module):
         position_encoder[:, 1::2] = torch.cos(position_encoder[:, 1::2])
         return position_encoder  # (Max_len, In_channel)
 
-    def forward(self, input):
+    def forward(self, input, method='add'):
+        # method: add(input+encode), plain(encode)
+
         ### Require DEBUG
         b, c, h, w = input.size()
         h_pos_encoding = (
@@ -390,8 +398,13 @@ class PositionalEncoding2D(nn.Module):
 
             pos_encoding = pos_encoding.permute(2, 0, 1)  # [2*D, H, W]
             pos_encoding = pos_encoding.unsqueeze(0) # [1, 2*D, H, W]
+            pos_encoding = pos_encoding.expand(b, -1, -1, -1)
 
-        out = input + pos_encoding # [B, 2*D, H, W]
+        if method == 'add':
+            out = input + pos_encoding # [B, 2*D, H, W]
+        elif method == 'plain':
+            out = pos_encoding
+
         out = self.dropout(out)
 
         return out
@@ -417,8 +430,11 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         checkpoint=None,
         use_adaptive_2d_encoding=False,
         locality_aware_feedforward=False,
+        use_tube=False,
     ):
         super(TransformerEncoderFor2DFeatures, self).__init__()
+
+        self.use_tube = use_tube
 
         self.shallow_cnn = DeepCNN300(
             input_size,
@@ -428,6 +444,7 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         )
         self.positional_encoding = PositionalEncoding2D(hidden_dim, device=device,
             use_adaptive_2d_encoding=use_adaptive_2d_encoding)
+
         self.attention_layers = nn.ModuleList(
             [
                 TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate,
@@ -435,6 +452,8 @@ class TransformerEncoderFor2DFeatures(nn.Module):
                 for _ in range(layer_num)
             ]
         )
+        if self.use_tube:
+            self.pos_bias = TUBEPosBias(hidden_dim, hidden_dim, head_num, dropout_rate)
 
         if checkpoint is not None:
             self.load_state_dict(checkpoint)
@@ -444,14 +463,28 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         out = self.shallow_cnn(input)  
         # [B, ((NF+D*GR)//2+D*GR)//2, H//8, W//8] = [B, 300, 16, 16]
         # NF//4 + 3*D*GR//4 = SATRN.encoder.hidden_dim
-        out = self.positional_encoding(out)  # [b, c, h, w]
 
-        # flatten
-        b, c, h, w = out.size()
-        out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
+        if self.use_tube:
+            enc = self.positional_encoding(out, method='plain')  # [b, c, h, w]
 
-        for layer in self.attention_layers:
-            out = layer(out, h, w)
+            # flatten
+            b, c, h, w = out.size()
+            out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
+            enc = enc.view(b, c, h * w).transpose(1, 2)
+
+            attn_bias = self.pos_bias(enc, enc)
+
+            for layer in self.attention_layers:
+                out = layer(out, h, w, attn_bias=attn_bias)
+        else:
+            out = self.positional_encoding(out)  # [b, c, h, w]
+
+            # flatten
+            b, c, h, w = out.size()
+            out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
+
+            for layer in self.attention_layers:
+                out = layer(out, h, w)
         return out # [b, h*w, c]
 
 
@@ -650,6 +683,11 @@ class SATRN(nn.Module):
         else:
             locality_aware_feedforward = FLAGS.SATRN.locality_aware_feedforward
 
+        if not hasattr(FLAGS.SATRN.encoder, 'use_tube'):
+            enc_use_tube = False
+        else:
+            enc_use_tube = FLAGS.SATRN.encoder.use_tube
+
         self.encoder = TransformerEncoderFor2DFeatures(
             input_size=FLAGS.data.rgb,
             hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
@@ -660,6 +698,7 @@ class SATRN(nn.Module):
             device=device,
             use_adaptive_2d_encoding=use_adaptive_2d_encoding,
             locality_aware_feedforward=locality_aware_feedforward,
+            use_tube=enc_use_tube,
         )
 
         self.decoder = TransformerDecoder(
