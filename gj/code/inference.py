@@ -102,7 +102,7 @@ def main(parser):
         input = d["image"].to(device)
         expected = d["truth"]["encoded"].to(device)
 
-        if hasattr(options.SATRN, 'solve_extra_pb'):
+        if hasattr(options.SATRN, 'solve_extra_pb') and options.SATRN.solve_extra_pb:
             output, _, _ = model(input, expected, False, 0.0)
         else:
             output = model(input, expected, False, 0.0)
