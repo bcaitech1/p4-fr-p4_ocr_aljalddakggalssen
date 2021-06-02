@@ -431,7 +431,7 @@ def dataset_loader(options, transformed):
         print(f'Valid: {old_valid_len} -> {len(valid_data)}')
 
     levels = load_levels(options.data.level_paths)
-    sources = load_levels(options.data.source_paths)
+    sources = load_sources(options.data.source_paths)
 
     train_dataset = LoadDataset(
         train_data, options.data.token_paths, sources=sources,
