@@ -157,15 +157,22 @@ class DeepCNN300(nn.Module):
         # D = depth
         # GR = growth_rate
         # input [B, C, H, W] = [B, 1, 128, 128]
-        out = self.conv0(input)  # [B, NF, H//2, W//2] = [B, 48, 64, 64]
+        
+        out = self.conv0(input)  # [B, NF, (H올림)//2, (W올림)//2] = [B, 48, 64, 64]
+        
         out = self.relu(self.norm0(out))
+        # [B, NF, ((=내림)]
         out = self.max_pool(out) # [B, NF, H//4, W//4] = [B, 48, 32, 32]
+        
         out = self.block1(out) # [B, NF+D*GR, H//4, W//4] = [B, 432, 32, 32]
         out = self.trans1(out) # [B, (NF+D*GR)//2, H//8, W//8] = [B, 216, 16, 16]
+        # [B, NF, ((=내림))]
+        
         out = self.block2(out) # [B, (NF+D*GR)//2+D*GR, H//8, W//8] = [B, 600, 16, 16]
         out_before_trans2 = self.trans2_relu(self.trans2_norm(out))
         out_A = self.trans2_conv(out_before_trans2)  
         # [B, ((NF+D*GR)//2+D*GR)//2, H//8, W//8] = [B, 300, 16, 16]
+        
         return out_A  # 128 x (16x16)
 
 
@@ -177,7 +184,7 @@ class ScaledDotProductAttention(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, q, k, v, mask=None, attn_bias=None):
-
+        # B, HEAD, Q_LEN, K_LEN
         attn = torch.matmul(q, k.transpose(2, 3)) / self.temperature
         if attn_bias is not None:
             attn += attn_bias
@@ -238,7 +245,7 @@ class MultiHeadAttention(nn.Module):
         out = self.out_linear(out)
         out = self.dropout(out)
 
-        return out
+        return out, attn
 
 
 class Feedforward(nn.Module):
@@ -313,9 +320,9 @@ class TransformerEncoderLayer(nn.Module):
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
     def forward(self, input, h, w, attn_bias=None):
-        att = self.attention_layer(input, input, input,
+        out, _ = self.attention_layer(input, input, input,
                 attn_bias=attn_bias)
-        out = self.attention_norm(att + input)
+        out = self.attention_norm(out + input)
 
         ff = self.feedforward_layer(out, h, w)
         out = self.feedforward_norm(ff + out)
@@ -513,28 +520,42 @@ class TransformerDecoderLayer(nn.Module):
         )
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
-    def forward(self, tgt, tgt_prev, src, tgt_mask):
+    def forward(self, tgt, tgt_prev, src, tgt_mask, get_attn=False):
 
         if tgt_prev == None:  # Train
-            att = self.self_attention_layer(tgt, tgt, tgt, tgt_mask)
+            att, attn_1 = self.self_attention_layer(tgt, tgt, tgt, tgt_mask)
+
             out = self.self_attention_norm(att + tgt)
 
-            att = self.attention_layer(tgt, src, src)
+            att, attn_2 = self.attention_layer(tgt, src, src)
+
+
             out = self.attention_norm(att + out)
 
             ff = self.feedforward_layer(out)
             out = self.feedforward_norm(ff + out)
+
+            if get_attn:
+                return out, attn_1, attn_2
+            else:
+                return out
         else:
             tgt_prev = torch.cat([tgt_prev, tgt], 1)
-            att = self.self_attention_layer(tgt, tgt_prev, tgt_prev, tgt_mask)
+            att, attn_1 = self.self_attention_layer(tgt, tgt_prev, tgt_prev, tgt_mask)
+
             out = self.self_attention_norm(att + tgt)
 
-            att = self.attention_layer(tgt, src, src)
+            att, attn_2 = self.attention_layer(tgt, src, src)
+
             out = self.attention_norm(att + out)
 
             ff = self.feedforward_layer(out)
             out = self.feedforward_norm(ff + out)
-        return out
+
+            if get_attn:
+                return out, attn_1, attn_2
+            else:
+                return out
 
 
 class PositionEncoder1D(nn.Module):
@@ -630,21 +651,30 @@ class TransformerDecoder(nn.Module):
         return tgt
 
     def forward(
-        self, src, text, is_train=True, batch_max_length=50, teacher_forcing_ratio=1.0
+        self, src, text, is_train=True, batch_max_length=50, teacher_forcing_ratio=1.0,
+        return_attn=False
     ):
 
         if is_train and random.random() < teacher_forcing_ratio:
             tgt = self.text_embedding(text)
             tgt = self.pos_encoder(tgt)
             tgt_mask = self.pad_mask(text) | self.order_mask(text.size(1))
-            for layer in self.attention_layers:
-                tgt = layer(tgt, None, src, tgt_mask)
+            if return_attn:
+                for layer in self.attention_layers:
+                    tgt, _, _ = layer(tgt, None, src, tgt_mask, return_attn)
+            else:
+                for layer in self.attention_layers:
+                    tgt = layer(tgt, None, src, tgt_mask, return_attn)
             out = self.generator(tgt)
         else:
             out = []
             num_steps = batch_max_length - 1
             target = torch.LongTensor(src.size(0)).view(-1).fill_(self.st_id).to(self.device) # [START] token
             features = [None] * self.layer_num
+
+            if return_attn:
+                attns_1 = []
+                attns_2 = []
 
             for t in range(num_steps):
                 target = target.unsqueeze(1)
@@ -653,10 +683,17 @@ class TransformerDecoder(nn.Module):
                 tgt_mask = self.order_mask(t + 1)
                 tgt_mask = tgt_mask[:, -1].unsqueeze(1)  # [1, (l+1)]
                 for l, layer in enumerate(self.attention_layers):
-                    tgt = layer(tgt, features[l], src, tgt_mask)
+                    if return_attn:
+                        tgt, attn_1, attn_2 = layer(tgt, features[l], src, tgt_mask, return_attn)
+                    else:
+                        tgt = layer(tgt, features[l], src, tgt_mask, return_attn)
                     features[l] = (
                         tgt if features[l] == None else torch.cat([features[l], tgt], 1)
                     )
+
+                    if return_attn:
+                        attns_1.append(attn_1.numpy())
+                        attns_2.append(attn_2.numpy())
 
                 _out = self.generator(tgt)  # [b, 1, c]
                 target = torch.argmax(_out[:, -1:, :], dim=-1)  # [b, 1]
@@ -666,7 +703,10 @@ class TransformerDecoder(nn.Module):
             out = torch.stack(out, dim=1).to(self.device)    # [b, max length, 1, class length]
             out = out.squeeze(2)    # [b, max length, class length]
 
-        return out
+        if return_attn:
+            return out, attns_1, attns_2
+        else:
+            return out
 
 
 class SATRN(nn.Module):
@@ -743,21 +783,40 @@ class SATRN(nn.Module):
         if checkpoint:
             self.load_state_dict(checkpoint)
 
-    def forward(self, input, expected, is_train, teacher_forcing_ratio):
+    def forward(self, input, expected, is_train, teacher_forcing_ratio, return_attn=False):
         # input [B, C, H, W] = [B, 1, 128, 128]
         enc_result = self.encoder(input) # [B, H*W, C] = [B, 16*16, 300]
-        dec_result = self.decoder(
-            enc_result,
-            expected[:, :-1],
-            is_train,
-            expected.size(1),
-            teacher_forcing_ratio,
-        )
+
+        if return_attn:
+            dec_result, attns_1, attns_2 = self.decoder(
+                enc_result,
+                expected[:, :-1],
+                is_train,
+                expected.size(1),
+                teacher_forcing_ratio,
+                return_attn=return_attn,
+            )
+        else:
+            dec_result = self.decoder(
+                enc_result,
+                expected[:, :-1],
+                is_train,
+                expected.size(1),
+                teacher_forcing_ratio,
+                return_attn=return_attn,
+            )
+
         if self.solve_extra_pb:
             enc_mean = torch.mean(enc_result, dim=1) # [B, 300]
             level_result = self.level_classifer(enc_mean) # [B, 5]
             source_result = self.source_classifier(enc_mean) # [B, 5]
-            
-            return dec_result, level_result, source_result
+
+            if return_attn:
+                return dec_result, level_result, source_result, attns_1, attns_2
+            else:
+                return dec_result, level_result, source_result
         else:
-            return dec_result
+            if return_attn:
+                return dec_result, attns_1, attns_2
+            else:
+                return dec_result
