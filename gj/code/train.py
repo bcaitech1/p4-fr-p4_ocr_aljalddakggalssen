@@ -116,21 +116,22 @@ def run_epoch(
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
 
             with autocast(enabled=use_amp):
+                output_dict = model(input, expected, train, teacher_forcing_ratio)
+                output = output_dict['out']
                 if options.SATRN.solve_extra_pb:
-                    output, level_result, source_result = \
-                        model(input, expected, train, teacher_forcing_ratio)
-                    decoded_values = output.transpose(1, 2)
-                    _, sequence = torch.topk(decoded_values, 1, dim=1)
-                    sequence = sequence.squeeze(1)
+                    level_result = output_dict['level_out']
+                    source_result = output_dict['source_out']
+
+                decoded_values = output.transpose(1, 2)
+                _, sequence = torch.topk(decoded_values, 1, dim=1)
+                sequence = sequence.squeeze(1)
+
+                if options.SATRN.solve_extra_pb:
                     loss_satrn = criterion[0](decoded_values, expected[:, 1:])
                     loss_level = criterion[1](level_result, levels_expected)
                     loss_source = criterion[2](source_result, sources_expected)
                     loss = loss_satrn + loss_level + loss_source
                 else:
-                    output = model(input, expected, train, teacher_forcing_ratio)
-                    decoded_values = output.transpose(1, 2)
-                    _, sequence = torch.topk(decoded_values, 1, dim=1)
-                    sequence = sequence.squeeze(1)
                     loss = criterion(decoded_values, expected[:, 1:])
 
             if train:
@@ -576,6 +577,8 @@ def main(config_file):
                     validation_epoch_symbol_accuracy,
                     validation_epoch_sentence_accuracy,
                     validation_epoch_wer,
+                    enc_epoch_lr,
+                    dec_epoch_lr,
                     model,
                 )
 

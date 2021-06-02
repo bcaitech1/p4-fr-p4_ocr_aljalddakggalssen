@@ -80,6 +80,8 @@ def log_stuff(
     validation_symbol_accuracy,
     validation_sentence_accuracy,
     validation_wer,
+    enc_lr,
+    dec_lr,
     model,
     train_total_loss=None,
     train_level_loss=None,
@@ -108,6 +110,8 @@ def log_stuff(
             'validation_symbol_accuracy': validation_symbol_accuracy,
             'validation_sentence_accuracy': validation_sentence_accuracy,
             'validation_wer': validation_wer,
+            'enc_lr': enc_lr,
+            'dec_lr': dec_lr,
         }
 
         if train_total_loss is not None:

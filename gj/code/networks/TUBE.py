@@ -22,21 +22,23 @@ class TUBEPosBias(nn.Module):
         self.temperature = 2 * (self.head_num * self.head_dim) ** 0.5
 
     def forward(self, q, k):
+        # q [B, Q_LEN, Q_DIM]
+        # k [B, K_LEN, K_DIM]
         # attn_bias [B, HEAD_NUM, Q_LEN, K_LEN]
         b, q_len, k_len = q.size(0), q.size(1), k.size(1)
         q = (
             self.q_linear(q)
-            .view(b, q_len, self.head_num, self.head_dim)
+            .reshape(b, q_len, self.head_num, self.head_dim)
             .transpose(1, 2)
         ) # [B, HEAD_NUM, Q_LEN, HEAD_DIM]
         k = (
             self.k_linear(k)
-            .view(b, k_len, self.head_num, self.head_dim)
+            .reshape(b, k_len, self.head_num, self.head_dim)
             .transpose(1, 2)
         )
 
 
         attn = torch.matmul(q, k.transpose(2, 3)) / self.temperature
 
-        return attn
+        return attn # [B, HEAD_NUM, Q_LEN, K_LEN]
 
