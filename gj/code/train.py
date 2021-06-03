@@ -29,7 +29,11 @@ from utils import (
 )
 from dataset import dataset_loader, START, PAD,load_vocab
 
-from metrics import word_error_rate,sentence_acc
+from metrics import (
+    word_error_rate,
+    sentence_acc,
+    correct_symbol,
+)
 
 from torch.cuda.amp import (
     GradScaler, 
@@ -39,8 +43,9 @@ from torch.cuda.amp import (
 def id_to_string(tokens, data_loader,do_eval=0):
     result = []
     if do_eval:
-        special_ids = [data_loader.dataset.token_to_id["<PAD>"], data_loader.dataset.token_to_id["<SOS>"],
-                       data_loader.dataset.token_to_id["<EOS>"]]
+        special_ids = set([data_loader.dataset.token_to_id["<PAD>"], data_loader.dataset.token_to_id["<SOS>"],
+                       data_loader.dataset.token_to_id["<EOS>"]])
+        eos_id = data_loader.dataset.token_to_id["<EOS>"]
 
     for example in tokens:
         string = ""
@@ -50,6 +55,8 @@ def id_to_string(tokens, data_loader,do_eval=0):
                 if token not in special_ids:
                     if token != -1:
                         string += data_loader.dataset.id_to_token[token] + " "
+                elif token == eos_id:
+                    break
         else:
             for token in example:
                 token = token.item()
@@ -190,7 +197,7 @@ def run_epoch(
             num_wer += len(expected_str)
             sent_acc += sentence_acc(sequence_str,expected_str)
             num_sent_acc += len(expected_str)
-            correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
+            correct_symbols += correct_symbol(sequence, expected[:, 1:])
             total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
 
             pbar.update(curr_batch_size)
