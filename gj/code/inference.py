@@ -124,7 +124,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint",
         dest="checkpoint",
-        default="/opt/ml/team/gj/code/log/satrn_pb_test/checkpoints/best.pt",
+        default="/opt/ml/code/submission/model/checkpoints/best.pth",
         type=str,
         help="Path of checkpoint file",
     )
