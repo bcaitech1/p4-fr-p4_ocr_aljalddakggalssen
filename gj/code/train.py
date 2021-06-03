@@ -389,6 +389,7 @@ def main(config_file):
 
     best_metric = 0
     # Train
+
     for epoch in range(options.num_epochs):
         start_time = time.time()
 
@@ -400,6 +401,16 @@ def main(config_file):
         )
 
         # Train
+        if options.num_epochs == 1:
+            teacher_forcing_ratio = options.teacher_forcing_ratio
+        else:
+            if hasattr(options, 'teacher_forcing_ratio_drop'):
+                tf_ratio_drop = options.teacher_forcing_ratio_drop
+            else:
+                tf_ratio_drop = 0
+            teacher_forcing_ratio = options.teacher_forcing_ratio- \
+                    (epoch/(options.num_epochs-1))*tf_ratio_drop
+        # print(teacher_forcing_ratio)
         train_result = run_epoch(
             train_data_loader,
             model,
@@ -409,7 +420,7 @@ def main(config_file):
             dec_optimizer,
             enc_lr_scheduler,
             dec_lr_scheduler,
-            options.teacher_forcing_ratio,
+            teacher_forcing_ratio,
             options.max_grad_norm,
             device,
             options=options,
@@ -580,6 +591,7 @@ def main(config_file):
                     enc_epoch_lr,
                     dec_epoch_lr,
                     model,
+                    teacher_forcing_ratio=teacher_forcing_ratio,
                 )
 
             if best_changed:

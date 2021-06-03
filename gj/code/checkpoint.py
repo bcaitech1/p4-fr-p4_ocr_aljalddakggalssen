@@ -89,6 +89,7 @@ def log_stuff(
     validation_total_loss=None,
     validation_level_loss=None,
     validation_source_loss=None,
+    teacher_forcing_ratio=None,
 ):
     if options.use_log_type is None:
         return None
@@ -112,6 +113,7 @@ def log_stuff(
             'validation_wer': validation_wer,
             'enc_lr': enc_lr,
             'dec_lr': dec_lr,
+            'teacher_forcing_ratio': teacher_forcing_ratio,
         }
 
         if train_total_loss is not None:
