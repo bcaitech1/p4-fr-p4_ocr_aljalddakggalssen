@@ -43,9 +43,9 @@ from torch.cuda.amp import (
 def id_to_string(tokens, data_loader,do_eval=0):
     result = []
     if do_eval:
-        special_ids = set([data_loader.dataset.token_to_id["<PAD>"], data_loader.dataset.token_to_id["<SOS>"],
-                       data_loader.dataset.token_to_id["<EOS>"]])
         eos_id = data_loader.dataset.token_to_id["<EOS>"]
+        special_ids = set([data_loader.dataset.token_to_id["<PAD>"], data_loader.dataset.token_to_id["<SOS>"],
+                       eos_id])
 
     for example in tokens:
         string = ""
