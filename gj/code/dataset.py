@@ -20,7 +20,7 @@ SPECIAL_TOKENS = [START, END, PAD]
 
 
 # Rather ignorant way to encode the truth, but at least it works.
-def encode_truth(truth, token_to_id):
+def encode_truth(truth, token_to_id, is_reverse=False):
 
     truth_tokens = truth.split()
     for token in truth_tokens:
@@ -28,6 +28,8 @@ def encode_truth(truth, token_to_id):
             raise Exception("Truth contains unknown token")
     truth_tokens = [token_to_id[x] for x in truth_tokens]
     if '' in truth_tokens: truth_tokens.remove('')
+    if is_reverse:
+        truth_tokens.reverse()
     return truth_tokens
 
 
@@ -193,6 +195,7 @@ class LoadDataset(Dataset):
         rgb=3,
         max_resolution=128*128,
         is_flexible=False,
+        is_reverse=False,
     ):
         """
         Args:
@@ -215,7 +218,8 @@ class LoadDataset(Dataset):
                     "text": truth,
                     "encoded": [
                         self.token_to_id[START],
-                        *encode_truth(truth, self.token_to_id),
+                        *encode_truth(truth, self.token_to_id,
+                            is_reverse=is_reverse),
                         self.token_to_id[END],
                     ],
                 },
@@ -301,6 +305,7 @@ class LoadEvalDataset(Dataset):
         rgb=3,
         max_resolution=128*128,
         is_flexible=False,
+        is_reverse=False,
     ):
         """
         Args:
@@ -325,7 +330,8 @@ class LoadEvalDataset(Dataset):
                     "text": truth,
                     "encoded": [
                         self.token_to_id[START],
-                        *encode_truth(truth, self.token_to_id),
+                        *encode_truth(truth, self.token_to_id,
+                            is_reverse=is_reverse),
                         self.token_to_id[END],
                     ],
                 },
@@ -439,6 +445,7 @@ def dataset_loader(options, transformed):
         transform=transformed, rgb=options.data.rgb,
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
+        is_reverse=options.data.is_reverse,
     )
 
     valid_dataset = LoadDataset(
@@ -447,6 +454,7 @@ def dataset_loader(options, transformed):
         transform=transformed, rgb=options.data.rgb,
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
+        is_reverse=options.data.is_reverse,
     )
 
     if options.data.flexible_image_size:
