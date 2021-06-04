@@ -130,7 +130,7 @@ def log_stuff(
         if validation_source_loss is not None:
             logging_stuff['validation_source_loss'] = validation_source_loss
 
-        wandb.log(logging_stuff, step=epoch)
+        wandb.log(logging_stuff, step=epoch, commit=True)
     else:
         raise NotImplementedError('Not supported logging')
 
