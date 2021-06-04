@@ -425,7 +425,7 @@ def dataset_loader(options, transformed):
         old_train_len = len(train_data)
         old_valid_len = len(valid_data)
         train_data = train_data[:100]
-        valid_data = valid_data[:10]
+        valid_data = valid_data[:100]
         print("Using Small Data")
         print(f"Train: {old_train_len} -> {len(train_data)}")
         print(f'Valid: {old_valid_len} -> {len(valid_data)}')

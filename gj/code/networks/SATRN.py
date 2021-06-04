@@ -9,6 +9,7 @@ from attrdict import AttrDict
 from dataset import START, PAD
 
 from networks.TUBE import TUBEPosBias
+from networks.stn import FlexibleSTN
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -829,6 +830,14 @@ class SATRN(nn.Module):
         else:
             self.use_tube = FLAGS.SATRN.use_tube
 
+        if not hasattr(FLAGS.SATRN, 'use_flexible_stn'):
+            self.use_flexible_stn = False
+        else:
+            self.use_flexible_stn = FLAGS.SATRN.use_flexible_stn
+
+        if self.use_flexible_stn:
+            self.stn = FlexibleSTN(rgb=FLAGS.data.rgb)
+
         self.encoder = TransformerEncoderFor2DFeatures(
             input_size=FLAGS.data.rgb,
             hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
@@ -882,7 +891,9 @@ class SATRN(nn.Module):
 
     def forward(self, input, expected, is_train, teacher_forcing_ratio, return_attn=False):
         # input [B, C, H, W] = [B, 1, 128, 128]
-        
+        if self.use_flexible_stn:
+            input = self.stn(input)
+            
         enc_result_dict = self.encoder(input) # [B, H*W, C] = [B, 16*16, 300]
         enc_result = enc_result_dict['out']
         h = enc_result_dict['h']
