@@ -787,8 +787,8 @@ class TransformerDecoder(nn.Module):
                     )
 
                     if return_attn:
-                        attns_1.append(attn_1.numpy())
-                        attns_2.append(attn_2.numpy())
+                        attns_1.append(attn_1.cpu().data.numpy())
+                        attns_2.append(attn_2.cpu().data.numpy())
 
                 _out = self.generator(tgt)  # [b, 1, c]
                 target = torch.argmax(_out[:, -1:, :], dim=-1)  # [b, 1]
@@ -889,10 +889,16 @@ class SATRN(nn.Module):
         if checkpoint:
             self.load_state_dict(checkpoint)
 
-    def forward(self, input, expected, is_train, teacher_forcing_ratio, return_attn=False):
+    def forward(self, input, expected, is_train, teacher_forcing_ratio,
+             return_attn=False, return_stn=False):
         # input [B, C, H, W] = [B, 1, 128, 128]
+        result = AttrDict()
+
         if self.use_flexible_stn:
             input = self.stn(input)
+            if return_stn:
+                result['stn'] = input.cpu().numpy()
+
             
         enc_result_dict = self.encoder(input) # [B, H*W, C] = [B, 16*16, 300]
         enc_result = enc_result_dict['out']
@@ -923,9 +929,7 @@ class SATRN(nn.Module):
             attns_1 = dec_result_dict['attns_1']
             attns_2 = dec_result_dict['attns_2']
 
-        result = AttrDict(
-            out=dec_result,
-        )
+        result['out'] =dec_result
 
         if self.solve_extra_pb:
             enc_mean = torch.mean(enc_result, dim=1) # [B, 300]
@@ -936,6 +940,7 @@ class SATRN(nn.Module):
             result['source_out'] = source_result
 
         if return_attn:
+            result['enc_result'] = enc_result.reshape(b, h, w, -1).cpu().data.numpy()
             result['attns_1'] = attns_1
             result['attns_2'] = attns_2
         

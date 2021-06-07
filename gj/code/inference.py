@@ -3,7 +3,7 @@ sys.path.insert(1, '/opt/ml/team/gj/code')
 
 import torch
 import os
-from train import id_to_string
+from train_method import id_to_string
 from metrics import word_error_rate, sentence_acc
 from checkpoint import load_checkpoint
 from torchvision import transforms

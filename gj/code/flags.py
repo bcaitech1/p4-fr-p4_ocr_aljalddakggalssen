@@ -45,6 +45,15 @@ class Flags:
             d = config_file
 
         self.d = deepcopy(d)
+
+        if 'curriculum_learning' not in d:
+            d['curriculum_learning'] = {
+                'using':False,
+            }
+
+        if 'is_reverse' not in d['data']:
+            d['data']['is_reverse'] = False
+
         self.flags = dict_to_namedtuple(d)
         
 
