@@ -25,6 +25,12 @@ def get_network(
     elif model_type == "SATRN":
         model = SATRN(FLAGS, train_dataset, checkpoint=model_checkpoint,
          device=device).to(device)
+
+        if FLAGS.SATRN.flexible_stn.use and FLAGS.SATRN.flexible_stn.train_stn_only:
+            for param in model.encoder.parameters():
+                param.requires_grad_ = False
+            for param in model.decoder.parameters():
+                param.requires_grad_ = False
     else:
         raise NotImplementedError
 
@@ -97,10 +103,14 @@ def get_lr_scheduler(options, options_optimizer, optimizer, data_loader):
             epochs=options_optimizer.lr_epochs,
             pct_start=options_optimizer.pct_start,
         )
+    elif options_optimizer.lr_scheduler == 'Same':
+        lr = options_optimizer.lr
+        lr_scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=options_optimizer.lr_epochs, gamma=0.1
+        )
     else:
         raise NotImplementedError(options_optimizer.lr_scheduler)
         
-
     return lr_scheduler
 
 def get_enc_dec_lr_scheduler(options, enc_optimizer, dec_optimizer, train_data_loader,

@@ -10,6 +10,7 @@ from dataset import START, PAD
 
 from networks.TUBE import TUBEPosBias
 from networks.stn import FlexibleSTN
+from torchvision.transforms.functional import rotate
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -505,6 +506,63 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         
         return result
 
+class RotationApplier(nn.Module):
+
+    def __init__(
+        self,
+        input_size,
+        hidden_dim,
+        device,
+        dropout_rate=0.1,
+        checkpoint=None,
+    ):
+        super().__init__()
+
+        self.shallow_cnn = DeepCNN300(
+            input_size,
+            num_in_features=48,
+            output_channel=hidden_dim,
+            dropout_rate=dropout_rate,
+        )
+
+        self.middle = nn.Sequential(
+            nn.Conv2d(hidden_dim, 16, 1),
+            nn.Dropout(0.1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4)), # B, 16, 4, 4
+            nn.Flatten(), # B, 16 * 4 * 4 = 256
+            nn.Linear(256, 8),
+        )
+
+        if checkpoint is not None:
+            self.load_state_dict(checkpoint)
+
+    def forward(self, input):
+        # input [B, C, H, W] = [B, 1, 128, 128]
+        out = self.shallow_cnn(input)
+        b, c, h, w = out.shape
+        out = self.middle(out) # [B, 4]
+        
+        which = torch.argmax(out, dim=-1) # [B]
+
+        # theta = theta.view(-1, 2, 3)
+
+        if which % 4 == 1:
+            new_input = input.transpose(-1, -2).flip(-1)
+        elif which % 4 == 2:
+            new_input = input.flip(dims=(-1, -2))
+        elif which % 4 == 3:
+            new_input = input.transpose(-1, -2).flip(-2)
+        else:
+            new_input = input
+            
+        if which // 4 == 1:
+            new_input = new_input.flip(-1)
+        
+        return new_input, which
+
+
 class TransformerDecoderLayer(nn.Module):
     def __init__(self, input_size, src_size, filter_size, head_num, 
         dropout_rate=0.2, use_tube=False):
@@ -830,13 +888,15 @@ class SATRN(nn.Module):
         else:
             self.use_tube = FLAGS.SATRN.use_tube
 
-        if not hasattr(FLAGS.SATRN, 'use_flexible_stn'):
-            self.use_flexible_stn = False
-        else:
-            self.use_flexible_stn = FLAGS.SATRN.use_flexible_stn
-
-        if self.use_flexible_stn:
-            self.stn = FlexibleSTN(rgb=FLAGS.data.rgb)
+        self.use_flexible_stn = FLAGS.SATRN.flexible_stn.use
+        if FLAGS.SATRN.flexible_stn.use and \
+            not FLAGS.SATRN.flexible_stn.train_stn_only:
+            self.stn = RotationApplier(
+                input_size=FLAGS.data.rgb,
+                hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
+                dropout_rate=FLAGS.dropout_rate,
+                device=device,
+            )
 
         self.encoder = TransformerEncoderFor2DFeatures(
             input_size=FLAGS.data.rgb,
@@ -889,15 +949,25 @@ class SATRN(nn.Module):
         if checkpoint:
             self.load_state_dict(checkpoint)
 
+        if FLAGS.SATRN.flexible_stn.use and \
+            FLAGS.SATRN.flexible_stn.train_stn_only:
+            self.stn = RotationApplier(
+                input_size=FLAGS.data.rgb,
+                hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
+                dropout_rate=FLAGS.dropout_rate,
+                device=device,
+            )
+
     def forward(self, input, expected, is_train, teacher_forcing_ratio,
              return_attn=False, return_stn=False):
         # input [B, C, H, W] = [B, 1, 128, 128]
         result = AttrDict()
 
         if self.use_flexible_stn:
-            input = self.stn(input)
+            input, which = self.stn(input)
             if return_stn:
                 result['stn'] = input.cpu().numpy()
+                result['which'] = which
 
             
         enc_result_dict = self.encoder(input) # [B, H*W, C] = [B, 16*16, 300]

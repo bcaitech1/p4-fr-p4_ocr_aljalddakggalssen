@@ -231,7 +231,7 @@ def main(config_file):
             writer,
             checkpoint,
             start_epoch,
-            set_optimizer_from_checkpoint=True,
+            set_optimizer_from_checkpoint=options.optimizer.set_optimizer_from_checkpoint,
         )
 
 if __name__ == "__main__":

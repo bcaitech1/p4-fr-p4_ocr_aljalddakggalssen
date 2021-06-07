@@ -54,6 +54,14 @@ class Flags:
         if 'is_reverse' not in d['data']:
             d['data']['is_reverse'] = False
 
+        if 'flexible_stn' not in d['SATRN']:
+            d['SATRN']['flexible_stn'] = {
+                'use': False
+            }
+
+        if 'set_optimizer_from_checkpoint' not in d['optimizer']:
+            d['optimizer']['set_optimizer_from_checkpoint'] = True
+            
         self.flags = dict_to_namedtuple(d)
         
 
