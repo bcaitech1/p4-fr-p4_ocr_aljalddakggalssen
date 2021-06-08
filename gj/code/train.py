@@ -156,6 +156,7 @@ def main(config_file):
         os.makedirs(cur_log_dir)
     log_file = open(os.path.join(cur_log_dir, "log.txt"), "w")
     shutil.copy(config_file, os.path.join(cur_log_dir, "train_config.yaml"))
+    config_file = os.path.join(cur_log_dir, "train_config.yaml")
     if options.print_epochs is None:
         options.print_epochs = options.num_epochs
 
