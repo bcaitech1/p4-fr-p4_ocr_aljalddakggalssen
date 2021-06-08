@@ -10,6 +10,7 @@ from dataset import START, PAD
 
 from networks.TUBE import TUBEPosBias
 from networks.stn import FlexibleSTN
+from networks.CSTR_Module import CBAM, SAM, SADM_A
 from torchvision.transforms.functional import rotate
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -175,6 +176,94 @@ class DeepCNN300(nn.Module):
         out_before_trans2 = self.trans2_relu(self.trans2_norm(out))
         out_A = self.trans2_conv(out_before_trans2)  
         # [B, ((NF+D*GR)//2+D*GR)//2, H//8, W//8] = [B, 300, 16, 16]
+        
+        return out_A  # 128 x (16x16)
+
+
+class CustomDeepCNN300(nn.Module):
+    def __init__(
+        self, input_channel, num_in_features, output_channel=256, dropout_rate=0.2, depth=16, growth_rate=24
+    ):
+        super(CustomDeepCNN300, self).__init__()
+        self.conv0 = nn.Conv2d( # 무조건 1/2
+            input_channel,  # 3
+            num_in_features,  # 48
+            kernel_size=7,
+            stride=2,
+            padding=3,
+            bias=False,
+        )
+        self.norm0 = nn.BatchNorm2d(num_in_features)
+        self.relu = nn.ReLU(inplace=True)
+
+        self.cbam0 = CBAM(num_in_features, num_in_features//2)
+        self.sam0 = SAM()
+
+        self.pooler0 = SADM_A(num_in_features, num_in_features)
+        num_features = num_in_features
+
+        self.block1 = DenseBlock(
+            num_features,  # 48
+            growth_rate=growth_rate,  # 48 + growth_rate(24)*depth(16) -> 432
+            depth=depth,  # 16?
+            dropout_rate=0.2,
+        )
+        num_features1 = num_features + depth * growth_rate
+
+        self.cbam1 = CBAM(num_features1, num_features1//2)
+        self.sam1 = SAM()
+        
+        self.pooler1 = SADM_A(num_features1, num_features1 // 2)
+        # self.trans1 = TransitionBlock(num_features, num_features // 2)  # 16 x 16
+        num_features2 = num_features1 // 2
+        self.block2 = DenseBlock(
+            num_features2,  # 128
+            growth_rate=growth_rate,  # 16
+            depth=depth,  # 8
+            dropout_rate=0.2,
+        )
+        num_features = num_features2 + depth * growth_rate
+        self.trans2_norm = nn.BatchNorm2d(num_features)
+        self.trans2_relu = nn.ReLU(inplace=True)
+        self.trans2_conv = nn.Conv2d(
+            num_features, num_features // 2, kernel_size=1, stride=1, bias=False  # 128
+        )
+        num_features = num_features // 2
+        self.cbam2 = CBAM(num_features, num_features//2)
+        self.sam2 = SAM()
+
+
+    def forward(self, input):
+        # NF = num_features
+        # D = depth
+        # GR = growth_rate
+        # input [B, C, H, W] = [B, 1, 128, 128]
+        
+        out = self.conv0(input)  # [B, NF, (H올림)//2, (W올림)//2] = [B, 48, 64, 64]
+        out = self.relu(self.norm0(out))
+        tmp = self.cbam0(out)
+        tmp = self.sam0(tmp)
+
+        out = out + tmp
+        # [B, NF, ((=내림)]
+
+        out = self.pooler0(out)
+        
+        out = self.block1(out) # [B, NF+D*GR, H//4, W//4] = [B, 432, 32, 32]
+        tmp = self.cbam1(out)
+        tmp = self.sam1(tmp)
+        out = out + tmp
+        out = self.pooler1(out) # [B, (NF+D*GR)//2, H//8, W//8] = [B, 216, 16, 16]
+        # [B, NF, ((=내림))]
+        
+        out = self.block2(out) # [B, (NF+D*GR)//2+D*GR, H//8, W//8] = [B, 600, 16, 16]
+        out_before_trans2 = self.trans2_relu(self.trans2_norm(out))
+
+        out_A = self.trans2_conv(out_before_trans2)  
+        # [B, ((NF+D*GR)//2+D*GR)//2, H//8, W//8] = [B, 300, 16, 16]
+        tmp = self.cbam2(out_A)
+        tmp = self.sam2(tmp)
+        out_A = out_A + tmp
         
         return out_A  # 128 x (16x16)
 
@@ -450,17 +539,26 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         use_adaptive_2d_encoding=False,
         locality_aware_feedforward=False,
         use_tube=False,
+        use_cstr_module=False,
     ):
         super(TransformerEncoderFor2DFeatures, self).__init__()
 
         self.use_tube = use_tube
 
-        self.shallow_cnn = DeepCNN300(
-            input_size,
-            num_in_features=48,
-            output_channel=hidden_dim,
-            dropout_rate=dropout_rate,
-        )
+        if use_cstr_module:
+            self.shallow_cnn = CustomDeepCNN300(
+                input_size,
+                num_in_features=48,
+                output_channel=hidden_dim,
+                dropout_rate=dropout_rate,
+            )
+        else:
+            self.shallow_cnn = DeepCNN300(
+                input_size,
+                num_in_features=48,
+                output_channel=hidden_dim,
+                dropout_rate=dropout_rate,
+            )
         self.positional_encoding = PositionalEncoding2D(hidden_dim, device=device,
             use_adaptive_2d_encoding=use_adaptive_2d_encoding)
 
@@ -527,9 +625,8 @@ class RotationApplier(nn.Module):
 
         self.middle = nn.Sequential(
             nn.Conv2d(hidden_dim, 16, 1),
-            nn.Dropout(0.1),
-            nn.BatchNorm2d(16),
             nn.ReLU(),
+            nn.BatchNorm2d(16),
             nn.AdaptiveAvgPool2d((4, 4)), # B, 16, 4, 4
             nn.Flatten(), # B, 16 * 4 * 4 = 256
             nn.Linear(256, 8),
@@ -888,6 +985,11 @@ class SATRN(nn.Module):
         else:
             self.use_tube = FLAGS.SATRN.use_tube
 
+        if not hasattr(FLAGS.SATRN, 'use_cstr_module'):
+            self.use_cstr_module = False
+        else:
+            self.use_cstr_module = FLAGS.SATRN.use_cstr_module
+
         self.use_flexible_stn = FLAGS.SATRN.flexible_stn.use
         if FLAGS.SATRN.flexible_stn.use and \
             not FLAGS.SATRN.flexible_stn.train_stn_only:
@@ -909,6 +1011,7 @@ class SATRN(nn.Module):
             use_adaptive_2d_encoding=use_adaptive_2d_encoding,
             locality_aware_feedforward=locality_aware_feedforward,
             use_tube=self.use_tube,
+            use_cstr_module=self.use_cstr_module,
         )
 
         self.decoder = TransformerDecoder(
