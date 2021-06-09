@@ -8,6 +8,7 @@ from scheduler import CircularLRBeta
 
 from networks.Attention import Attention
 from networks.SATRN import SATRN
+from networks.DecoderOnly import DecoderOnly
 
 
 def get_network(
@@ -31,6 +32,9 @@ def get_network(
                 param.requires_grad_ = False
             for param in model.decoder.parameters():
                 param.requires_grad_ = False
+    elif model_type == 'DecoderOnly':
+        model = DecoderOnly(FLAGS, train_dataset, checkpoint=model_checkpoint,
+         device=device).to(device)
     else:
         raise NotImplementedError
 

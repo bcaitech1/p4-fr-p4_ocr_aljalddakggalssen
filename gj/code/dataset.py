@@ -211,6 +211,7 @@ class LoadDataset(Dataset):
         is_flexible=False,
         is_reverse=False,
         use_curr=False,
+        use_flip_channel=False,
     ):
         """
         Args:
@@ -226,6 +227,7 @@ class LoadDataset(Dataset):
         self.crop = crop
         self.transform = transform
         self.rgb = rgb
+        self.use_flip_channel = use_flip_channel
         self.token_to_id, self.id_to_token = load_vocab(tokens_file)
         self.data = [
             {
@@ -285,6 +287,10 @@ class LoadDataset(Dataset):
 
         if self.is_flexible:
             image = transforms.Resize(self.get_shape(i))(image)
+
+        if self.use_flip_channel:
+            tmp = image.flip(-1)
+            image = torch.cat([image, tmp], dim=0)
 
         return {
             "path": item["path"],
@@ -347,6 +353,7 @@ class LoadEvalDataset(Dataset):
         max_resolution=128*128,
         is_flexible=False,
         is_reverse=False,
+        use_flip_channel=False,
     ):
         """
         Args:
@@ -360,6 +367,7 @@ class LoadEvalDataset(Dataset):
         super(LoadEvalDataset, self).__init__()
         self.crop = crop
         self.rgb = rgb
+        self.use_flip_channel = use_flip_channel
         self.token_to_id = token_to_id
         self.id_to_token = id_to_token
         self.transform = transform
@@ -409,6 +417,10 @@ class LoadEvalDataset(Dataset):
 
         if self.is_flexible:
             image = transforms.Resize(self.get_shape(i))(image)
+
+        if self.use_flip_channel:
+            tmp = image.flip(-1)
+            image = torch.cat([image, tmp], dim=0)
 
         return {"path": item["path"], "file_path":item["file_path"],"truth": item["truth"], "image": image}
 
@@ -508,6 +520,7 @@ def dataset_loader_old(options, transformed):
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
         is_reverse=options.data.is_reverse,
+        use_flip_channel=options.data.use_flip_channel,
     )
 
     valid_dataset = LoadDataset(
@@ -517,6 +530,7 @@ def dataset_loader_old(options, transformed):
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
         is_reverse=options.data.is_reverse,
+        use_flip_channel=options.data.use_flip_channel,
     )
 
     if options.data.flexible_image_size:
@@ -658,6 +672,7 @@ def dataset_loader(options, transformed):
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
         use_curr=options.curriculum_learning.using,
+        use_flip_channel=options.data.use_flip_channel,
     )
 
     valid_dataset = LoadDataset(
@@ -667,6 +682,7 @@ def dataset_loader(options, transformed):
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
         use_curr=options.curriculum_learning.using,
+        use_flip_channel=options.data.use_flip_channel,
     )
 
     if options.curriculum_learning.using:

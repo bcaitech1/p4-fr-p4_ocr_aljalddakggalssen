@@ -66,6 +66,7 @@ def main(parser):
         max_resolution=options.input_size.height * options.input_size.width,
         is_flexible=options.data.flexible_image_size,
         is_reverse=options.data.is_reverse,
+        use_flip_channel=options.data.use_flip_channel,
     )
 
     if options.data.flexible_image_size:
