@@ -556,10 +556,12 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         locality_aware_feedforward=False,
         use_tube=False,
         use_cstr_module=False,
+        share_transformer=False,
     ):
         super(TransformerEncoderFor2DFeatures, self).__init__()
 
         self.use_tube = use_tube
+        self.share_transformer = share_transformer
 
         if use_cstr_module:
             self.shallow_cnn = CustomDeepCNN300(
@@ -578,13 +580,19 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         self.positional_encoding = PositionalEncoding2D(hidden_dim, device=device,
             use_adaptive_2d_encoding=use_adaptive_2d_encoding)
 
-        self.attention_layers = nn.ModuleList(
-            [
-                TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate,
-                    locality_aware_feedforward, self.use_tube)
-                for _ in range(layer_num)
-            ]
-        )
+        if self.share_transformer:
+            self.attention_layers = TransformerEncoderLayer(hidden_dim, filter_size,
+             head_num, dropout_rate, locality_aware_feedforward, self.use_tube)
+            self.layer_num = layer_num
+        else:
+            self.attention_layers = nn.ModuleList(
+                [
+                    TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate,
+                        locality_aware_feedforward, self.use_tube)
+                    for _ in range(layer_num)
+                ]
+            )
+
         if self.use_tube:
             self.pos_bias = TUBEPosBias(hidden_dim, hidden_dim, head_num, dropout_rate)
 
@@ -609,8 +617,12 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             # flatten
         out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
 
-        for layer in self.attention_layers:
-            out = layer(out, h, w, attn_bias=attn_bias)
+        if self.share_transformer:
+            for _ in range(self.layer_num):
+                out = self.attention_layers(out, h, w, attn_bias=attn_bias)
+        else:
+            for layer in self.attention_layers:
+                out = layer(out, h, w, attn_bias=attn_bias)
 
         result = AttrDict(
             out=out,
@@ -845,6 +857,7 @@ class TransformerDecoder(nn.Module):
         use_multi_sample_dropout=False,
         multi_sample_dropout_ratio=None,
         multi_sample_dropout_nums=None,
+        share_transformer=False,
     ):
         super(TransformerDecoder, self).__init__()
 
@@ -857,21 +870,28 @@ class TransformerDecoder(nn.Module):
         self.head_num = head_num
         self.use_multi_sample_dropout = use_multi_sample_dropout
         self.multi_sample_dropout_nums = multi_sample_dropout_nums
+        self.share_transformer = share_transformer
         # https://aimaster.tistory.com/90 참조
 
         self.pos_encoder = PositionEncoder1D(
             in_channels=hidden_dim, dropout=dropout_rate, device=device
         )
 
-        self.attention_layers = nn.ModuleList(
-            [
-                TransformerDecoderLayer(
-                    hidden_dim, src_dim, filter_dim, head_num, dropout_rate, use_tube=self.use_tube,
-                    use_between_ff_layer=use_between_ff_layer
-                )
-                for _ in range(layer_num)
-            ]
-        )
+        if self.share_transformer:
+            self.attention_layers = TransformerDecoderLayer(
+                hidden_dim, src_dim, filter_dim, head_num, dropout_rate, use_tube=self.use_tube,
+                use_between_ff_layer=use_between_ff_layer
+            )
+        else:
+            self.attention_layers = nn.ModuleList(
+                [
+                    TransformerDecoderLayer(
+                        hidden_dim, src_dim, filter_dim, head_num, dropout_rate, use_tube=self.use_tube,
+                        use_between_ff_layer=use_between_ff_layer
+                    )
+                    for _ in range(layer_num)
+                ]
+            )
 
         if self.use_multi_sample_dropout:
             self.ms_dropout = nn.Dropout(multi_sample_dropout_ratio),
@@ -931,13 +951,22 @@ class TransformerDecoder(nn.Module):
             # [B, 1, S] | [1, S, S] = [B, S, S]
             tgt_mask = self.pad_mask(text) | self.order_mask(text.size(1))
 
-            for layer in self.attention_layers:
-                layer_output_dict = layer(tgt, None, src, tgt_mask, return_attn,
-                    attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                tgt = layer_output_dict['out'] # [B, S, D]
-                if return_attn:
-                    attns_1 = layer_output_dict['attn_1']
-                    attns_2 = layer_output_dict['attn_2']
+            if self.share_transformer:   
+                for _ in range(self.layer_num):
+                    layer_output_dict = self.attention_layers(tgt, None, src, tgt_mask, return_attn,
+                        attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
+                    tgt = layer_output_dict['out'] # [B, S, D]
+                    if return_attn:
+                        attns_1 = layer_output_dict['attn_1']
+                        attns_2 = layer_output_dict['attn_2']
+            else:
+                for layer in self.attention_layers:
+                    layer_output_dict = layer(tgt, None, src, tgt_mask, return_attn,
+                        attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
+                    tgt = layer_output_dict['out'] # [B, S, D]
+                    if return_attn:
+                        attns_1 = layer_output_dict['attn_1']
+                        attns_2 = layer_output_dict['attn_2']
 
             if self.use_multi_sample_dropout and self.training:
                 out = torch.mean(
@@ -994,22 +1023,41 @@ class TransformerDecoder(nn.Module):
                 tgt_mask = self.order_mask(t + 1) # [1, t+1, t+1]
                 tgt_mask = tgt_mask[:, -1].unsqueeze(1)  # [1, t+1]
 
-                for l, layer in enumerate(self.attention_layers):
-                    layer_output_dict = layer(tgt, features[l], src, tgt_mask, return_attn,
-                        attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                    tgt = layer_output_dict['out'] # [B, 1, D]
-                    if return_attn:
-                        attn_1 = layer_output_dict['attn_1']
-                        attn_2 = layer_output_dict['attn_2']
+                if self.share_transformer:
+                    for l in range(self.layer_num):
+                        layer_output_dict = self.attention_layers(tgt, features[l], 
+                            src, tgt_mask, return_attn,
+                            attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
+                        tgt = layer_output_dict['out'] # [B, 1, D]
+                        if return_attn:
+                            attn_1 = layer_output_dict['attn_1']
+                            attn_2 = layer_output_dict['attn_2']
 
-                    # features[l] [B, t+1, D]
-                    features[l] = ( 
-                        tgt if features[l] is None else torch.cat([features[l], tgt], 1)
-                    )
+                        # features[l] [B, t+1, D]
+                        features[l] = ( 
+                            tgt if features[l] is None else torch.cat([features[l], tgt], 1)
+                        )
 
-                    if return_attn:
-                        attns_1.append(attn_1.cpu().data.numpy())
-                        attns_2.append(attn_2.cpu().data.numpy())
+                        if return_attn:
+                            attns_1.append(attn_1.cpu().data.numpy())
+                            attns_2.append(attn_2.cpu().data.numpy())
+                else:
+                    for l, layer in enumerate(self.attention_layers):
+                        layer_output_dict = layer(tgt, features[l], src, tgt_mask, return_attn,
+                            attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
+                        tgt = layer_output_dict['out'] # [B, 1, D]
+                        if return_attn:
+                            attn_1 = layer_output_dict['attn_1']
+                            attn_2 = layer_output_dict['attn_2']
+
+                        # features[l] [B, t+1, D]
+                        features[l] = ( 
+                            tgt if features[l] is None else torch.cat([features[l], tgt], 1)
+                        )
+
+                        if return_attn:
+                            attns_1.append(attn_1.cpu().data.numpy())
+                            attns_2.append(attn_2.cpu().data.numpy())
 
                 if self.use_multi_sample_dropout and self.training:
                     _out = torch.mean(
@@ -1095,6 +1143,7 @@ class SATRN(nn.Module):
             locality_aware_feedforward=locality_aware_feedforward,
             use_tube=self.use_tube,
             use_cstr_module=self.use_cstr_module,
+            share_transformer=FLAGS.SATRN.share_transformer,
         )
 
         self.decoder = TransformerDecoder(
@@ -1113,6 +1162,7 @@ class SATRN(nn.Module):
             use_multi_sample_dropout=FLAGS.SATRN.use_multi_sample_dropout,
             multi_sample_dropout_ratio=FLAGS.SATRN.multi_sample_dropout_ratio,
             multi_sample_dropout_nums=FLAGS.SATRN.multi_sample_dropout_nums,
+            share_transformer=FLAGS.SATRN.share_transformer,
         )
 
         if self.solve_extra_pb:

@@ -65,6 +65,9 @@ class Flags:
         if 'use_multi_sample_dropout' not in d['SATRN']:
             d['SATRN']['use_multi_sample_dropout'] = False
 
+        if 'share_transformer' not in d['SATRN']:
+            d['SATRN']['share_transformer'] = False
+
         if 'multi_sample_dropout_ratio' not in d['SATRN']:
             d['SATRN']['multi_sample_dropout_ratio'] = None
 
