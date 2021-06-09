@@ -740,7 +740,7 @@ class TransformerDecoderLayer(nn.Module):
                 ff = self.between_ff_layer(out)
                 out = self.between_ff_norm(ff + out)
 
-            out_dict = self.attention_layer(tgt, src, src, attn_bias=attn_2d_bias, get_attn=get_attn)
+            out_dict = self.attention_layer(out, src, src, attn_bias=attn_2d_bias, get_attn=get_attn)
             att = out_dict['out']
             if get_attn:
                 attn_2 = out_dict['attn']
@@ -776,7 +776,7 @@ class TransformerDecoderLayer(nn.Module):
 
             out = self.self_attention_norm(att + tgt)
 
-            out_dict = self.attention_layer(tgt, src, src, attn_bias=attn_2d_bias) # [B, 1, D]
+            out_dict = self.attention_layer(out, src, src, attn_bias=attn_2d_bias) # [B, 1, D]
             att = out_dict['out']
             if get_attn:
                 attn_2 = out_dict['attn']
