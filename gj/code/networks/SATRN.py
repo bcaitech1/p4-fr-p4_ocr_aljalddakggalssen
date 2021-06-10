@@ -282,7 +282,7 @@ class ScaledDotProductAttention(nn.Module):
             attn += attn_bias
 
         if mask is not None:
-            attn = attn.masked_fill(mask=mask, value=float("-inf"))
+            attn = attn.masked_fill(mask=mask, value=-10000.0)
         attn = torch.softmax(attn, dim=-1)
         attn = self.dropout(attn)
         out = torch.matmul(attn, v)
