@@ -430,7 +430,7 @@ class LoadEvalDataset(Dataset):
         image = Image.open(item["path"])
 
         if self.apply_clihe:
-            image = np.arrary(image)
+            image = np.array(image)
             image = claheCVT(image)
             image = transforms.ToPILImage()(image)
 

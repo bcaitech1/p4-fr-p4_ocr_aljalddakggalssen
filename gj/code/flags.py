@@ -51,6 +51,9 @@ class Flags:
                 'using':False,
             }
 
+        if 'flexible_image_size' not in d['data']:
+            d['data']['flexible_image_size'] = False
+
         if 'is_reverse' not in d['data']:
             d['data']['is_reverse'] = False
 

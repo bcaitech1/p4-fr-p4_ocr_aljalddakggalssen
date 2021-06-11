@@ -106,8 +106,8 @@ def main(parser):
         input = d["image"].to(device)
         expected = d["truth"]["encoded"].to(device)
 
-        output_dict = model(input, expected, False, 0.0)
-        output = output_dict['out']
+        output = model(input, expected, False, 0.0)
+        # output = output_dict['out']
         decoded_values = output.transpose(1, 2)
         _, sequence = torch.topk(decoded_values, 1, dim=1)
         sequence = sequence.squeeze(1)
