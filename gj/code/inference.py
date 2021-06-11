@@ -101,26 +101,74 @@ def main(parser):
         test_dataset,
     )
     model.eval()
-    results = {}
-    for d in tqdm(test_data_loader):
-        input = d["image"].to(device)
-        expected = d["truth"]["encoded"].to(device)
 
-        output = model(input, expected, False, 0.0)
-        # output = output_dict['out']
-        decoded_values = output.transpose(1, 2)
-        _, sequence = torch.topk(decoded_values, 1, dim=1)
-        sequence = sequence.squeeze(1)
-        sequence_str = id_to_string(sequence, test_data_loader, do_eval=1)
-        for path, predicted in zip(d["file_path"], sequence_str):
-            results[path] =  predicted
+    if parser.use_rotation == 'yes':
+        print('using rotation inference')
+        results = []
+        newresults=[]
+        crit=[]
+        rot=[0,1,3,2]
+        for i in rot[0:int(parser.direction_nums)]:
+            print(f'{i} 번째 회전')
+            newresults=[]
+            for d in tqdm(test_data_loader):
+                input = d["image"].to(device)
+        #         print(input.shape)
+                input=torch.rot90(input, i, [2, 3])
+                expected = d["truth"]["encoded"].to(device)
 
-    os.makedirs(parser.output_dir, exist_ok=True)
-    with open(os.path.join(parser.output_dir, "output.csv"), "w") as w:
-        for i in range(len(test_dataset)):
-            path = test_dataset[i]['file_path']
-            predicted = results[path]
-            w.write(path + "\t" + predicted + "\n")
+                output = model(input, expected, False, 0.0)
+                decoded_values = output.transpose(1, 2)
+                score, sequence = torch.topk(decoded_values, 1, dim=1)
+                sequence = sequence.squeeze(1)
+                score = score.squeeze(1)
+                score=torch.log(score)
+                score=torch.sum(score,1,True).tolist()
+
+                if parser.rotation_print == 'yes':
+                    print(score)
+                sequence_str = id_to_string(sequence, test_data_loader, do_eval=1)
+
+                if parser.rotation_print == 'yes':
+                    print(sequence_str)
+                if i ==0:
+                    for path, predicted, score in zip(d["file_path"], sequence_str,score):
+                        results.append([path, predicted,score[0]])
+                else:
+                    for path, predicted, score in zip(d["file_path"], sequence_str,score):
+                        newresults.append([path, predicted,score[0]])
+                    for k in range(len(newresults)):
+                        if (newresults[k][2]>results[k][2]) and (int(parser.ans_th)>results[k][2]):
+                            results[k]=newresults[k]
+    #             print('one rotation done')
+                
+
+        os.makedirs(parser.output_dir, exist_ok=True)
+        with open(os.path.join(parser.output_dir, "output.csv"), "w") as w:
+            for path, predicted,score in results:
+                w.write(path + "\t" + predicted  +"\n")
+    else:
+        print('using normal inference')
+        results = {}
+        for d in tqdm(test_data_loader):
+            input = d["image"].to(device)
+            expected = d["truth"]["encoded"].to(device)
+
+            output = model(input, expected, False, 0.0)
+            # output = output_dict['out']
+            decoded_values = output.transpose(1, 2)
+            _, sequence = torch.topk(decoded_values, 1, dim=1)
+            sequence = sequence.squeeze(1)
+            sequence_str = id_to_string(sequence, test_data_loader, do_eval=1)
+            for path, predicted in zip(d["file_path"], sequence_str):
+                results[path] =  predicted
+
+        os.makedirs(parser.output_dir, exist_ok=True)
+        with open(os.path.join(parser.output_dir, "output.csv"), "w") as w:
+            for i in range(len(test_dataset)):
+                path = test_dataset[i]['file_path']
+                predicted = results[path]
+                w.write(path + "\t" + predicted + "\n")
 
 
 if __name__ == "__main__":
@@ -128,7 +176,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint",
         dest="checkpoint",
-        default="/opt/ml/code/submission/model/checkpoints/best.pth",
+        default="/opt/ml/code/satrn_cur_best_long/checkpoints/best.pth",
         type=str,
         help="Path of checkpoint file",
     )
@@ -142,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         dest="batch_size",
-        default=8,
+        default=2,
         type=int,
         help="batch size when doing inference",
     )
@@ -164,6 +212,35 @@ if __name__ == "__main__":
         default=output_dir,
         type=str,
         help="output directory",
+    )
+
+    parser.add_argument(
+        "--direction_nums",
+        dest="direction_nums",
+        default="1",
+        type=str,
+        help="none, left, right",
+    )
+    parser.add_argument(
+        "--ans_th",
+        dest="ans_th",
+        default="600",
+        type=str,
+        help="changing ans threshhold",
+    )
+    
+    parser.add_argument(
+        "--use_rotation",
+        dest="use_rotation",
+        default="no",
+        type=str,
+    )
+    
+    parser.add_argument(
+        "--rotation_print",
+        dest="rotation_print",
+        default="yes",
+        type=str,
     )
 
     parser = parser.parse_args()

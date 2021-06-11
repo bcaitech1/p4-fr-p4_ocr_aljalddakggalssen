@@ -289,7 +289,7 @@ class LoadDataset(Dataset):
             image = claheCVT(image)
             image = transforms.ToPILImage()(image)
 
-        if self.rotate_img and image.size[0] < image.size[1]:
+        if self.rotate_img and int(2.1 * image.size[0]) < image.size[1]:
             image = transforms.RandomRotation((-90, -90), expand=True)(image)
 
         if self.rgb == 3:
@@ -329,7 +329,8 @@ class LoadDataset(Dataset):
             item = self.data[i]
             image = Image.open(item["path"])
             rw, rh = image.size
-            if self.rotate_img and rw < rh:
+
+            if self.rotate_img and int(2.1 * rw) < rh:
                 rw, rh = rh, rw
 
             T = self.max_resolution
@@ -434,7 +435,7 @@ class LoadEvalDataset(Dataset):
             image = claheCVT(image)
             image = transforms.ToPILImage()(image)
 
-        if self.rotate_img and image.size[0] < image.size[1]:
+        if self.rotate_img and int(2.1 * image.size[0]) < image.size[1]:
             image = transforms.RandomRotation((-90, -90), expand=True)(image)
 
         if self.rgb == 3:
@@ -469,7 +470,7 @@ class LoadEvalDataset(Dataset):
             image = Image.open(item["path"])
             rw, rh = image.size
 
-            if self.rotate_img and rw < rh:
+            if self.rotate_img and int(2.1 * rw) < rh:
                 rw, rh = rh, rw
 
             T = self.max_resolution
