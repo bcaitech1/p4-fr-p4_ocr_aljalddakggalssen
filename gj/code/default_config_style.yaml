@@ -8,28 +8,55 @@ SATRN:
     filter_dim: 600
     layer_num: 6
     head_num: 8
-    use_tube: True
   decoder:
     src_dim: 300
     hidden_dim: 128
     filter_dim: 512
     layer_num: 3
     head_num: 8
-  use_adaptive_2d_encoding: True
+    use_between_ff_layer: True
+  use_adaptive_2d_encoding: False
   solve_extra_pb: False
   locality_aware_feedforward: True
+  use_tube: False
+  flexible_stn:
+    use: False
+    train_stn_only: False
+  use_cstr_module: False
+  use_multi_sample_dropout: True
+  multi_sample_dropout_ratio: 0.3
+  multi_sample_dropout_nums: 8
 Attention:
   src_dim: 512
   hidden_dim: 128
   embedding_dim: 128
   layer_num: 1
   cell_type: "LSTM"
-checkpoint: '' #/opt/ml/team/gj/code/log/satrn/checkpoints/best.pth
-log_dir: /opt/ml/team/gj/code/log
-
+DecoderOnly:
+  encoder:
+    hidden_dim: 300
+    filter_dim: 600
+    layer_num: 6
+    head_num: 8
+    use_256_input: True
+  decoder:
+    src_dim: 300
+    hidden_dim: 128
+    filter_dim: 512
+    layer_num: 6
+    head_num: 8
+  locality_aware_feedforward: True
+checkpoint:  '' #/opt/ml/input/data/saving_model/satrn_decoder_mixed_256/checkpoints/best.pth
+log_dir: /opt/ml/input/data/saving_model
 
 ########################### NAME 
-prefix: satrn_tube_enc_test
+prefix: satrn_between_ff
+
+# curriculum learning each level
+# currently does not support resuming learning
+curriculum_learning:
+  using: False
+  max_level: 5
 
 data:
   train: # "/opt/ml/input/data/train_dataset/gt.txt"
@@ -66,41 +93,69 @@ data:
   test_proportions: 0.2 # only if random_split is True
   crop: True
   rgb: 1    # 3 for color, 1 for greyscale
+  use_flip_channel: False
   flexible_image_size: True
-  use_small_data: True # {False |  True}
+  use_small_data: False # {False |  True}
+  is_reverse: False
 
-batch_size: 36
+batch_size: 36 # 36 # 24 = 6 decoder
 num_workers: 8
 num_epochs: 10
 print_epochs: 1
-save_type: best # no_save: dont save, best: save best 1
+save_type: best # no_save: dont save, best: save best 1, latest: save last one
 use_amp: True
-device_pref: cpu # {cpu | cuda}
+device_pref: cuda # {cpu | cuda}
 dropout_rate: 0.1
 teacher_forcing_ratio: 0.5
+teacher_forcing_ratio_drop: 0.0
 max_grad_norm: 2.0
 seed: 1234
 optimizer:
+  set_optimizer_from_checkpoint: True
   encoder:
     type: 'AdamP' # Adam, AdamW Adadelta, AdamP, SGDP
-    lr: 5e-4 # 1e-4
+    lr:  5e-4 # 1e-4
     weight_decay: 1e-4
-    is_cycle: True
+    lr_scheduler: CircularLRBeta # CircularLRBeta StepLR # OneCycleLR dont work
+      # Same
+    lr_epochs: 100000000
+    pct_start: 0.1
   decoder:
     type: 'AdamW' # Adam, AdamW, Adadelta, AdamP, SGDP
     lr: 5e-4 # 1e-4
     weight_decay: 1e-4
-    is_cycle: True
+    lr_scheduler: CircularLRBeta # CircularLRBeta StepLR
+    lr_epochs: 100000000
+    pct_start: 0.1
+  # is_first curriculm 용
+  first_encoder:
+    type: 'AdamP' # Adam, AdamW Adadelta, AdamP, SGDP
+    lr: 5e-4 # 1e-4
+    weight_decay: 1e-4
+    lr_scheduler: CircularLRBeta # CircularLRBeta StepLR OneCycleLR
+    lr_epochs: 10
+    pct_start: 0.3
+  first_decoder:
+    type: 'AdamP' # Adam, AdamW Adadelta, AdamP, SGDP
+    lr: 5e-4 # 1e-4
+    weight_decay: 1e-4
+    lr_scheduler: CircularLRBeta # CircularLRBeta StepLR OneCycleLR
+    lr_epochs: 10
+    pct_start: 0.3
     
 use_log_type: wandb # null, tensorboard, wandb # not using tensorboard
 wandb:
   project: ocr
   entity: rolypolyvg295
   tags: 
-    - v0
+    - v2
     - ocr
     - 10ep
-    - tube_enc
+
+
+  # v0 시작
+  # v1 loss에 pad 추가
+  # v2 문장 생성 <eos>에서 멈추게 + symbol accuracy pad 무시
 
   ######################### NAME 
   name: null # null: use prefix instead

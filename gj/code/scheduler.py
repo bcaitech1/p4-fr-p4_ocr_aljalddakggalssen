@@ -30,6 +30,9 @@ class CircularLRBeta:
 
         return lr
 
+    def get_last_lr(self):
+        return [self.get_lr()]
+
     def get_momentum(self):
         if self.iteration > 2 * self.cycle_step:
             momentum = self.momentum[0]

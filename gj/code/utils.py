@@ -8,6 +8,7 @@ from scheduler import CircularLRBeta
 
 from networks.Attention import Attention
 from networks.SATRN import SATRN
+from networks.DecoderOnly import DecoderOnly
 
 
 def get_network(
@@ -24,6 +25,15 @@ def get_network(
              device=device).to(device)
     elif model_type == "SATRN":
         model = SATRN(FLAGS, train_dataset, checkpoint=model_checkpoint,
+         device=device).to(device)
+
+        if FLAGS.SATRN.flexible_stn.use and FLAGS.SATRN.flexible_stn.train_stn_only:
+            for param in model.encoder.parameters():
+                param.requires_grad_ = False
+            for param in model.decoder.parameters():
+                param.requires_grad_ = False
+    elif model_type == 'DecoderOnly':
+        model = DecoderOnly(FLAGS, train_dataset, checkpoint=model_checkpoint,
          device=device).to(device)
     else:
         raise NotImplementedError
@@ -77,28 +87,52 @@ def setup_enc_dec_optimizer(options, checkpoint,
     setup_optimizer(enc_optimizer, options.optimizer.encoder.lr, enc_optimizer_state)
     setup_optimizer(dec_optimizer, options.optimizer.decoder.lr, dec_optimizer_state)
 
-def get_lr_scheduler(options, options_optimizer, optimizer, train_data_loader):
-    if options_optimizer.is_cycle:
-        cycle = len(train_data_loader) * options.num_epochs
+def get_lr_scheduler(options, options_optimizer, optimizer, data_loader):
+    if options_optimizer.lr_scheduler == 'CircularLRBeta':
+        cycle = len(data_loader) * options.num_epochs
         lr_scheduler = CircularLRBeta(
             optimizer, options_optimizer.lr, 10, 10, cycle, [0.95, 0.85]
         )
-    else:
+    elif options_optimizer.lr_scheduler == 'StepLR':
         lr_scheduler = optim.lr_scheduler.StepLR(
             optimizer,
             step_size=options_optimizer.lr_epochs,
             gamma=options_optimizer.lr_factor,
         )
-
+    elif options_optimizer.lr_scheduler == 'OneCycleLR':
+        lr_scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=options_optimizer.lr,
+            steps_per_epoch=len(data_loader),
+            epochs=options_optimizer.lr_epochs,
+            pct_start=options_optimizer.pct_start,
+        )
+    elif options_optimizer.lr_scheduler == 'Same':
+        lr = options_optimizer.lr
+        lr_scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=options_optimizer.lr_epochs, gamma=0.1
+        )
+    else:
+        raise NotImplementedError(options_optimizer.lr_scheduler)
+        
     return lr_scheduler
 
-def get_enc_dec_lr_scheduler(options, enc_optimizer, dec_optimizer, train_data_loader):
+def get_enc_dec_lr_scheduler(options, enc_optimizer, dec_optimizer, train_data_loader,
+    is_first=False):
+    """ is_first curriculm 용"""
+    if is_first:
+        enc_option = options.optimizer.first_encoder
+        dec_option = options.optimizer.first_decoder
+    else:
+        enc_option = options.optimizer.encoder
+        dec_option = options.optimizer.decoder
+
     enc_lr_scheduler = get_lr_scheduler(
-        options, options.optimizer.encoder, enc_optimizer, train_data_loader
+        options, enc_option, enc_optimizer, train_data_loader
     )
 
     dec_lr_scheduler = get_lr_scheduler(
-        options, options.optimizer.decoder, dec_optimizer, train_data_loader
+        options, dec_option, dec_optimizer, train_data_loader
     )
 
     return enc_lr_scheduler, dec_lr_scheduler
