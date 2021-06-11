@@ -13,6 +13,8 @@ from torch.utils.data import (
     Subset,
 )
 
+import cv2
+
 from tqdm.auto import trange, tqdm
 from torchvision import transforms
 from copy import deepcopy
@@ -22,6 +24,14 @@ END = "<EOS>"
 PAD = "<PAD>"
 SPECIAL_TOKENS = [START, END, PAD]
 
+def claheCVT(own_img) :
+    lab = cv2.cvtColor(own_img, cv2.COLOR_BGR2LAB)
+    lab_planes = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit = 2.0, tileGridSize = (8, 8))
+    lab_planes[0] = clahe.apply(lab_planes[0])
+    lab = cv2.merge(lab_planes)
+    cla_img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    return cla_img
 
 # Rather ignorant way to encode the truth, but at least it works.
 def encode_truth(truth, token_to_id, is_reverse=False):
@@ -212,6 +222,7 @@ class LoadDataset(Dataset):
         is_reverse=False,
         use_curr=False,
         use_flip_channel=False,
+        apply_clihe=False,
     ):
         """
         Args:
@@ -224,6 +235,7 @@ class LoadDataset(Dataset):
         """
         super(LoadDataset, self).__init__()
         self.use_curr = use_curr
+        self.apply_clihe = apply_clihe
         self.crop = crop
         self.transform = transform
         self.rgb = rgb
@@ -269,6 +281,12 @@ class LoadDataset(Dataset):
     def __getitem__(self, i):
         item = self.data[i]
         image = Image.open(item["path"])
+
+        if self.apply_clihe:
+            image = np.array(image)
+            image = claheCVT(image)
+            image = transforms.ToPILImage()(image)
+
         if self.rgb == 3:
             image = image.convert("RGB")
         elif self.rgb == 1:
@@ -354,6 +372,7 @@ class LoadEvalDataset(Dataset):
         is_flexible=False,
         is_reverse=False,
         use_flip_channel=False,
+        apply_clihe=False,
     ):
         """
         Args:
@@ -371,6 +390,7 @@ class LoadEvalDataset(Dataset):
         self.token_to_id = token_to_id
         self.id_to_token = id_to_token
         self.transform = transform
+        self.apply_clihe = apply_clihe
         self.data = [
             {
                 "path": p,
@@ -399,6 +419,12 @@ class LoadEvalDataset(Dataset):
     def __getitem__(self, i):
         item = self.data[i]
         image = Image.open(item["path"])
+
+        if self.apply_clihe:
+            image = np.arrary(image)
+            image = claheCVT(image)
+            image = transforms.ToPILImage()(image)
+
         if self.rgb == 3:
             image = image.convert("RGB")
         elif self.rgb == 1:
@@ -673,6 +699,7 @@ def dataset_loader(options, transformed):
         is_flexible=options.data.flexible_image_size,
         use_curr=options.curriculum_learning.using,
         use_flip_channel=options.data.use_flip_channel,
+        apply_clihe=options.data.apply_clihe,
     )
 
     valid_dataset = LoadDataset(
@@ -683,6 +710,7 @@ def dataset_loader(options, transformed):
         is_flexible=options.data.flexible_image_size,
         use_curr=options.curriculum_learning.using,
         use_flip_channel=options.data.use_flip_channel,
+        apply_clihe=options.data.apply_clihe,
     )
 
     if options.curriculum_learning.using:

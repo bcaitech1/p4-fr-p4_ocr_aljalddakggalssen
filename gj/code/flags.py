@@ -57,6 +57,9 @@ class Flags:
         if 'use_flip_channel' not in d['data']:
             d['data']['use_flip_channel'] = False
 
+        if 'apply_clihe' not in d['data']:
+            d['data']['apply_clihe'] = False
+
         if 'flexible_stn' not in d['SATRN']:
             d['SATRN']['flexible_stn'] = {
                 'use': False
