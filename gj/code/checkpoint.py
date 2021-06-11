@@ -26,11 +26,13 @@ default_checkpoint = {
 }
 
 
-def save_checkpoint(checkpoint, dir="./checkpoints", prefix="", save_best=False):
+def save_checkpoint(checkpoint, dir="./checkpoints", prefix="", save_type=''):
     # Padded to 4 digits because of lexical sorting of numbers.
     # e.g. 0009.pth
-    if save_best:
+    if save_type == 'best':
         filename = "best.pth"
+    elif save_type == 'latest':
+        filename = 'latest.pth'
     else:
         filename = "{num:0>4}.pth".format(num=checkpoint["epoch"])
     if not os.path.exists(os.path.join(prefix, dir)):
@@ -130,7 +132,7 @@ def log_stuff(
         if validation_source_loss is not None:
             logging_stuff['validation_source_loss'] = validation_source_loss
 
-        wandb.log(logging_stuff, step=epoch)
+        wandb.log(logging_stuff, step=epoch, commit=True)
     else:
         raise NotImplementedError('Not supported logging')
 
