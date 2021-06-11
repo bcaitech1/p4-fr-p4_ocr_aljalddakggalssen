@@ -78,6 +78,17 @@ def run_epoch(
     torch.set_grad_enabled(train)
     if train:
         model.train()
+        enc_optim_params = [
+            p
+            for param_group in enc_optimizer.param_groups
+            for p in param_group["params"]
+        ]
+
+        dec_optim_params = [
+            p
+            for param_group in dec_optimizer.param_groups
+            for p in param_group["params"]
+        ]
         scaler = GradScaler(enabled=use_amp)
     else:
         model.eval()
@@ -103,23 +114,27 @@ def run_epoch(
         leave=False,
     ) as pbar:
         for d in data_loader:
+            if train:
+                enc_optimizer.zero_grad()
+                dec_optimizer.zero_grad()
+                
             input = d["image"].to(device)
 
             # The last batch may not be a full batch
             curr_batch_size = len(input)
             expected = d["truth"]["encoded"].to(device)
-            levels_expected = d['level'].to(device)
-            sources_expected = d['source'].to(device)
+            # levels_expected = d['level'].to(device)
+            # sources_expected = d['source'].to(device)
 
             # Replace -1 with the PAD token
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
 
             with autocast(enabled=use_amp):
-                output_dict = model(input, expected, train, teacher_forcing_ratio)
-                output = output_dict['out']
-                if options.SATRN.solve_extra_pb:
-                    level_result = output_dict['level_out']
-                    source_result = output_dict['source_out']
+                output = model(input, expected, train, teacher_forcing_ratio)
+                # output = output_dict['out']
+                # if options.SATRN.solve_extra_pb:
+                #     level_result = output_dict['level_out']
+                #     source_result = output_dict['source_out']
 
                 decoded_values = output.transpose(1, 2)
                 _, sequence = torch.topk(decoded_values, 1, dim=1)
@@ -132,23 +147,10 @@ def run_epoch(
                     loss = loss_satrn + loss_level + loss_source
                 else:
                     loss = criterion(decoded_values, expected[:, 1:])
+                
+                del decoded_values
 
             if train:
-                enc_optim_params = [
-                    p
-                    for param_group in enc_optimizer.param_groups
-                    for p in param_group["params"]
-                ]
-
-                dec_optim_params = [
-                    p
-                    for param_group in dec_optimizer.param_groups
-                    for p in param_group["params"]
-                ]
-
-                enc_optimizer.zero_grad()
-                dec_optimizer.zero_grad()
-                
                 scaler.scale(loss).backward()
                 scaler.unscale_(enc_optimizer)
                 scaler.unscale_(dec_optimizer)
@@ -180,8 +182,12 @@ def run_epoch(
                 losses_source.append(loss_source.item() * len(input))
             else:
                 losses.append(loss.item() * len(input))
+            
+            del loss, output
             total_inputs += len(input)
 
+            expected = expected.cpu()
+            sequence = sequence.cpu()
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
             expected_str = id_to_string(expected, data_loader,do_eval=1)
             sequence_str = id_to_string(sequence, data_loader,do_eval=1)
@@ -200,6 +206,8 @@ def run_epoch(
     print(*expected[:3], sep="\n")
     print("-" * 10 + "PR ({})".format("train" if train else "valid"))
     print(*sequence[:3], sep="\n")
+
+    del expected, sequence
     
     if options.SATRN.solve_extra_pb:
         result = {

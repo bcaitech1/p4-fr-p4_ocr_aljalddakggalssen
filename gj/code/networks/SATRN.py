@@ -287,13 +287,13 @@ class ScaledDotProductAttention(nn.Module):
         attn = self.dropout(attn)
         out = torch.matmul(attn, v)
 
-        result = AttrDict(
-            out=out
-        )
+        # result = AttrDict(
+        #     out=out
+        # )
 
-        if get_attn:
-            result['attn'] = attn
-        return result
+        # if get_attn:
+        #     result['attn'] = attn
+        return out
 
 
 class MultiHeadAttention(nn.Module):
@@ -341,10 +341,10 @@ class MultiHeadAttention(nn.Module):
         if mask is not None:
             mask = mask.unsqueeze(1)
 
-        out_dict = self.attention(q, k, v, mask=mask, attn_bias=attn_bias, get_attn=get_attn)
-        out = out_dict['out']
-        if get_attn:
-            attn = out_dict['attn']
+        out = self.attention(q, k, v, mask=mask, attn_bias=attn_bias, get_attn=get_attn)
+        # out = out_dict['out']
+        # if get_attn:
+        #     attn = out_dict['attn']
         out = (
             out.transpose(1, 2)
             .contiguous()
@@ -353,12 +353,12 @@ class MultiHeadAttention(nn.Module):
         out = self.out_linear(out)
         out = self.dropout(out)
 
-        result = AttrDict(
-            out=out,
-        )
-        if get_attn:
-            result['attn'] = attn
-        return result
+        # result = AttrDict(
+        #     out=out,
+        # )
+        # if get_attn:
+        #     result['attn'] = attn
+        return out
 
 
 class Feedforward(nn.Module):
@@ -377,25 +377,52 @@ class Feedforward(nn.Module):
     def forward(self, input, h=0, w=0):
         return self.layers(input)
 
+class SeparableCNN(nn.Module):
+    def __init__(self, in_channels, kernel_size, stride=1, padding=0, bias=True):
+        super().__init__()
+        self.depth = nn.Conv2d(in_channels, in_channels, kernel_size,
+            stride=stride, padding=padding, groups=in_channels, bias=bias)
+        self.point = nn.Conv2d(in_channels, in_channels, 1, bias=bias)
+        
+    def forward(self, x):
+        x = self.depth(x)
+        x = self.point(x)
+        return x
 
 class LocalityAwareFeedforward(nn.Module):
-    def __init__(self, filter_size=2048, hidden_dim=512, dropout=0.1):
+    def __init__(self, filter_size=2048, hidden_dim=512, dropout=0.1, use_separable_cnn=False):
         super(LocalityAwareFeedforward, self).__init__()
 
-        self.layers = nn.Sequential( # [b, hidden_dim, h, w]
-            nn.Conv2d(hidden_dim, filter_size, 1, bias=False), # [b, filter, h, w]
-            nn.BatchNorm2d(filter_size),
-            nn.ReLU(True),
-            nn.Dropout(p=dropout),
-            nn.Conv2d(filter_size, filter_size, 3, stride=1, padding=1, bias=False), # [b, filter, h, w]
-            nn.BatchNorm2d(filter_size),
-            nn.ReLU(True),
-            nn.Dropout(p=dropout),
-            nn.Conv2d(filter_size, hidden_dim, 1, bias=False), # [b, hidden_dim, h, w]
-            nn.BatchNorm2d(hidden_dim),
-            nn.ReLU(True),
-            nn.Dropout(p=dropout),
-        )
+        if use_separable_cnn:
+            self.layers = nn.Sequential( # [b, hidden_dim, h, w]
+                nn.Conv2d(hidden_dim, filter_size, 1, bias=False), # [b, filter, h, w]
+                nn.BatchNorm2d(filter_size),
+                nn.ReLU(True),
+                nn.Dropout(p=dropout),
+                SeparableCNN(filter_size, 3, padding=1, bias=False),
+                nn.BatchNorm2d(filter_size),
+                nn.ReLU(True),
+                nn.Dropout(p=dropout),
+                nn.Conv2d(filter_size, hidden_dim, 1, bias=False), # [b, hidden_dim, h, w]
+                nn.BatchNorm2d(hidden_dim),
+                nn.ReLU(True),
+                nn.Dropout(p=dropout),
+            )
+        else:
+            self.layers = nn.Sequential( # [b, hidden_dim, h, w]
+                nn.Conv2d(hidden_dim, filter_size, 1, bias=False), # [b, filter, h, w]
+                nn.BatchNorm2d(filter_size),
+                nn.ReLU(True),
+                nn.Dropout(p=dropout),
+                nn.Conv2d(filter_size, filter_size, 3, stride=1, padding=1, bias=False), # [b, filter, h, w]
+                nn.BatchNorm2d(filter_size),
+                nn.ReLU(True),
+                nn.Dropout(p=dropout),
+                nn.Conv2d(filter_size, hidden_dim, 1, bias=False), # [b, hidden_dim, h, w]
+                nn.BatchNorm2d(hidden_dim),
+                nn.ReLU(True),
+                nn.Dropout(p=dropout),
+            )
 
     def forward(self, input, h=0, w=0):
         # [b, h * w, c]
@@ -410,7 +437,7 @@ class LocalityAwareFeedforward(nn.Module):
 
 class TransformerEncoderLayer(nn.Module):
     def __init__(self, input_size, filter_size, head_num, dropout_rate=0.2,
-        locality_aware_feedforward=False, use_tube=False):
+        locality_aware_feedforward=False, use_tube=False, use_separable_cnn=False):
         super(TransformerEncoderLayer, self).__init__()
 
         self.attention_layer = MultiHeadAttention(
@@ -425,7 +452,7 @@ class TransformerEncoderLayer(nn.Module):
         self.locality_aware_feedforward = locality_aware_feedforward
         if self.locality_aware_feedforward:
             self.feedforward_layer = LocalityAwareFeedforward(
-                filter_size=filter_size, hidden_dim=input_size
+                filter_size=filter_size, hidden_dim=input_size, use_separable_cnn=use_separable_cnn,
             )
         else:
             self.feedforward_layer = Feedforward(
@@ -434,9 +461,9 @@ class TransformerEncoderLayer(nn.Module):
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
     def forward(self, input, h, w, attn_bias=None):
-        out_dict = self.attention_layer(input, input, input,
+        out = self.attention_layer(input, input, input,
                 attn_bias=attn_bias)
-        out = out_dict['out']
+        # out = out_dict['out']
         out = self.attention_norm(out + input)
 
         ff = self.feedforward_layer(out, h, w)
@@ -557,38 +584,48 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         use_tube=False,
         use_cstr_module=False,
         share_transformer=False,
+        use_separable_cnn=False,
+        start_dim=48,
+        depth=16,
+        growth_rate=24,
     ):
         super(TransformerEncoderFor2DFeatures, self).__init__()
 
         self.use_tube = use_tube
         self.share_transformer = share_transformer
 
+        assert start_dim // 4 + (depth * growth_rate * 3) // 4 == hidden_dim
+
         if use_cstr_module:
             self.shallow_cnn = CustomDeepCNN300(
                 input_size,
-                num_in_features=48,
+                num_in_features=start_dim,
                 output_channel=hidden_dim,
                 dropout_rate=dropout_rate,
+                depth=depth,
+                growth_rate=growth_rate,
             )
         else:
             self.shallow_cnn = DeepCNN300(
                 input_size,
-                num_in_features=48,
+                num_in_features=start_dim,
                 output_channel=hidden_dim,
                 dropout_rate=dropout_rate,
+                depth=depth,
+                growth_rate=growth_rate,
             )
         self.positional_encoding = PositionalEncoding2D(hidden_dim, device=device,
             use_adaptive_2d_encoding=use_adaptive_2d_encoding)
 
         if self.share_transformer:
             self.attention_layers = TransformerEncoderLayer(hidden_dim, filter_size,
-             head_num, dropout_rate, locality_aware_feedforward, self.use_tube)
+             head_num, dropout_rate, locality_aware_feedforward, self.use_tube, use_separable_cnn)
             self.layer_num = layer_num
         else:
             self.attention_layers = nn.ModuleList(
                 [
                     TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate,
-                        locality_aware_feedforward, self.use_tube)
+                        locality_aware_feedforward, self.use_tube, use_separable_cnn)
                     for _ in range(layer_num)
                 ]
             )
@@ -624,13 +661,13 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             for layer in self.attention_layers:
                 out = layer(out, h, w, attn_bias=attn_bias)
 
-        result = AttrDict(
-            out=out,
-            h=h,
-            w=w,
-        )
+        # result = AttrDict(
+        #     out=out,
+        #     h=h,
+        #     w=w,
+        # )
         
-        return result
+        return out, h, w
 
 class RotationApplier(nn.Module):
 
@@ -728,11 +765,11 @@ class TransformerDecoderLayer(nn.Module):
     def forward(self, tgt, tgt_prev, src, tgt_mask,
          get_attn=False, attn_bias=None, attn_2d_bias=None):
         if tgt_prev is None:  # Train
-            out_dict = self.self_attention_layer(tgt, tgt, tgt, tgt_mask, attn_bias=attn_bias,
+            att = self.self_attention_layer(tgt, tgt, tgt, tgt_mask, attn_bias=attn_bias,
                 get_attn=get_attn)
-            att = out_dict['out']
-            if get_attn:
-                attn_1 = out_dict['attn']
+            # att = out_dict['out']
+            # if get_attn:
+            #     attn_1 = out_dict['attn']
 
             out = self.self_attention_norm(att + tgt)
 
@@ -740,25 +777,25 @@ class TransformerDecoderLayer(nn.Module):
                 ff = self.between_ff_layer(out)
                 out = self.between_ff_norm(ff + out)
 
-            out_dict = self.attention_layer(out, src, src, attn_bias=attn_2d_bias, get_attn=get_attn)
-            att = out_dict['out']
-            if get_attn:
-                attn_2 = out_dict['attn']
+            att = self.attention_layer(out, src, src, attn_bias=attn_2d_bias, get_attn=get_attn)
+            # att = out_dict['out']
+            # if get_attn:
+            #     attn_2 = out_dict['attn']
 
             out = self.attention_norm(att + out)
 
             ff = self.feedforward_layer(out)
             out = self.feedforward_norm(ff + out)
 
-            result = AttrDict(
-                out=out,
-            )
+            # result = AttrDict(
+            #     out=out,
+            # )
 
-            if get_attn:
-                result['attn_1'] = attn_1
-                result['attn_2'] = attn_2
+            # if get_attn:
+            #     result['attn_1'] = attn_1
+            #     result['attn_2'] = attn_2
  
-            return result
+            return out
         else:
             
             # tgt, tgt_prev, src, tgt_mask
@@ -768,33 +805,33 @@ class TransformerDecoderLayer(nn.Module):
             # tgt_mask [1, t+1] (t 현재 생성 index)
 
             tgt_prev = torch.cat([tgt_prev, tgt], 1) # [B, t+1, D]
-            out_dict = self.self_attention_layer(tgt, tgt_prev, tgt_prev, tgt_mask, 
+            att = self.self_attention_layer(tgt, tgt_prev, tgt_prev, tgt_mask, 
                 attn_bias=attn_bias) # [B, 1, D]
-            att = out_dict['out']
-            if get_attn:
-                attn_1 = out_dict['attn']
+            # att = out_dict['out']
+            # if get_attn:
+            #     attn_1 = out_dict['attn']
 
             out = self.self_attention_norm(att + tgt)
 
-            out_dict = self.attention_layer(out, src, src, attn_bias=attn_2d_bias) # [B, 1, D]
-            att = out_dict['out']
-            if get_attn:
-                attn_2 = out_dict['attn']
+            att = self.attention_layer(out, src, src, attn_bias=attn_2d_bias) # [B, 1, D]
+            # att = out_dict['out']
+            # if get_attn:
+            #     attn_2 = out_dict['attn']
 
             out = self.attention_norm(att + out)
 
             ff = self.feedforward_layer(out)
             out = self.feedforward_norm(ff + out)
 
-            result = AttrDict(
-                out=out,
-            )
+            # result = AttrDict(
+            #     out=out,
+            # )
 
-            if get_attn:
-                result['attn_1'] = attn_1
-                result['attn_2'] = attn_2
+            # if get_attn:
+            #     result['attn_1'] = attn_1
+            #     result['attn_2'] = attn_2
  
-            return result
+            return out
 
 
 class PositionEncoder1D(nn.Module):
@@ -858,10 +895,16 @@ class TransformerDecoder(nn.Module):
         multi_sample_dropout_ratio=None,
         multi_sample_dropout_nums=None,
         share_transformer=False,
+        emb_dim=128,
     ):
         super(TransformerDecoder, self).__init__()
 
-        self.embedding = nn.Embedding(num_classes + 1, hidden_dim)
+        self.emb_dim = emb_dim
+        self.embedding = nn.Embedding(num_classes + 1, self.emb_dim)
+
+        if self.emb_dim != hidden_dim:
+            self.emb_linear = nn.Linear(self.emb_dim, hidden_dim)
+
         self.hidden_dim = hidden_dim
         self.filter_dim = filter_dim
         self.num_classes = num_classes
@@ -894,7 +937,7 @@ class TransformerDecoder(nn.Module):
             )
 
         if self.use_multi_sample_dropout:
-            self.ms_dropout = nn.Dropout(multi_sample_dropout_ratio),
+            self.ms_dropout = nn.Dropout(multi_sample_dropout_ratio)
 
         self.generator = nn.Linear(hidden_dim, num_classes)
 
@@ -925,6 +968,9 @@ class TransformerDecoder(nn.Module):
         tgt = self.embedding(texts)
         tgt *= math.sqrt(tgt.size(2))
 
+        if self.emb_dim != self.hidden_dim:
+            tgt = self.emb_linear(tgt)
+
         return tgt
 
     def forward(
@@ -953,20 +999,20 @@ class TransformerDecoder(nn.Module):
 
             if self.share_transformer:   
                 for _ in range(self.layer_num):
-                    layer_output_dict = self.attention_layers(tgt, None, src, tgt_mask, return_attn,
+                    tgt = self.attention_layers(tgt, None, src, tgt_mask, return_attn,
                         attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                    tgt = layer_output_dict['out'] # [B, S, D]
-                    if return_attn:
-                        attns_1 = layer_output_dict['attn_1']
-                        attns_2 = layer_output_dict['attn_2']
+                    # tgt = layer_output_dict['out'] # [B, S, D]
+                    # if return_attn:
+                    #     attns_1 = layer_output_dict['attn_1']
+                    #     attns_2 = layer_output_dict['attn_2']
             else:
                 for layer in self.attention_layers:
-                    layer_output_dict = layer(tgt, None, src, tgt_mask, return_attn,
+                    tgt = layer(tgt, None, src, tgt_mask, return_attn,
                         attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                    tgt = layer_output_dict['out'] # [B, S, D]
-                    if return_attn:
-                        attns_1 = layer_output_dict['attn_1']
-                        attns_2 = layer_output_dict['attn_2']
+                    # tgt = layer_output_dict['out'] # [B, S, D]
+                    # if return_attn:
+                    #     attns_1 = layer_output_dict['attn_1']
+                    #     attns_2 = layer_output_dict['attn_2']
 
             if self.use_multi_sample_dropout and self.training:
                 out = torch.mean(
@@ -1025,39 +1071,39 @@ class TransformerDecoder(nn.Module):
 
                 if self.share_transformer:
                     for l in range(self.layer_num):
-                        layer_output_dict = self.attention_layers(tgt, features[l], 
+                        tgt = self.attention_layers(tgt, features[l], 
                             src, tgt_mask, return_attn,
                             attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                        tgt = layer_output_dict['out'] # [B, 1, D]
-                        if return_attn:
-                            attn_1 = layer_output_dict['attn_1']
-                            attn_2 = layer_output_dict['attn_2']
+                        # tgt = layer_output_dict['out'] # [B, 1, D]
+                        # if return_attn:
+                        #     attn_1 = layer_output_dict['attn_1']
+                        #     attn_2 = layer_output_dict['attn_2']
 
                         # features[l] [B, t+1, D]
                         features[l] = ( 
                             tgt if features[l] is None else torch.cat([features[l], tgt], 1)
                         )
 
-                        if return_attn:
-                            attns_1.append(attn_1.cpu().data.numpy())
-                            attns_2.append(attn_2.cpu().data.numpy())
+                        # if return_attn:
+                        #     attns_1.append(attn_1.cpu().data.numpy())
+                        #     attns_2.append(attn_2.cpu().data.numpy())
                 else:
                     for l, layer in enumerate(self.attention_layers):
-                        layer_output_dict = layer(tgt, features[l], src, tgt_mask, return_attn,
+                        tgt = layer(tgt, features[l], src, tgt_mask, return_attn,
                             attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                        tgt = layer_output_dict['out'] # [B, 1, D]
-                        if return_attn:
-                            attn_1 = layer_output_dict['attn_1']
-                            attn_2 = layer_output_dict['attn_2']
+                        # tgt = layer_output_dict['out'] # [B, 1, D]
+                        # if return_attn:
+                        #     attn_1 = layer_output_dict['attn_1']
+                        #     attn_2 = layer_output_dict['attn_2']
 
                         # features[l] [B, t+1, D]
                         features[l] = ( 
                             tgt if features[l] is None else torch.cat([features[l], tgt], 1)
                         )
 
-                        if return_attn:
-                            attns_1.append(attn_1.cpu().data.numpy())
-                            attns_2.append(attn_2.cpu().data.numpy())
+                        # if return_attn:
+                        #     attns_1.append(attn_1.cpu().data.numpy())
+                        #     attns_2.append(attn_2.cpu().data.numpy())
 
                 if self.use_multi_sample_dropout and self.training:
                     _out = torch.mean(
@@ -1081,13 +1127,13 @@ class TransformerDecoder(nn.Module):
             out = torch.stack(out, dim=1).to(self.device)    # [b, max length, 1, class length]
             out = out.squeeze(2)    # [b, max length, class length]
 
-        result = AttrDict(
-            out=out
-        )
-        if return_attn:
-            result['attns_1'] = attns_1
-            result['attns_2'] = attns_2
-        return result
+        # result = AttrDict(
+        #     out=out
+        # )
+        # if return_attn:
+        #     result['attns_1'] = attns_1
+        #     result['attns_2'] = attns_2
+        return out
 
 class SATRN(nn.Module):
     def __init__(self, FLAGS, train_dataset, device, checkpoint=None):
@@ -1144,6 +1190,10 @@ class SATRN(nn.Module):
             use_tube=self.use_tube,
             use_cstr_module=self.use_cstr_module,
             share_transformer=FLAGS.SATRN.share_transformer,
+            use_separable_cnn=FLAGS.SATRN.use_separable_cnn,
+            start_dim=FLAGS.SATRN.encoder.start_dim,
+            depth=FLAGS.SATRN.encoder.depth,
+            growth_rate=FLAGS.SATRN.encoder.growth_rate,
         )
 
         self.decoder = TransformerDecoder(
@@ -1163,24 +1213,26 @@ class SATRN(nn.Module):
             multi_sample_dropout_ratio=FLAGS.SATRN.multi_sample_dropout_ratio,
             multi_sample_dropout_nums=FLAGS.SATRN.multi_sample_dropout_nums,
             share_transformer=FLAGS.SATRN.share_transformer,
+            emb_dim=FLAGS.SATRN.decoder.emb_dim,
         )
 
         if self.solve_extra_pb:
-            self.level_classifer = nn.Sequential(
-                nn.ReLU(),
-                nn.Linear(FLAGS.SATRN.encoder.hidden_dim, 5)
-            )
+            pass
+            # self.level_classifer = nn.Sequential(
+            #     nn.ReLU(),
+            #     nn.Linear(FLAGS.SATRN.encoder.hidden_dim, 5)
+            # )
 
-            self.source_classifier = nn.Sequential(
-                nn.ReLU(),
-                nn.Linear(FLAGS.SATRN.encoder.hidden_dim, 2)
-            )
+            # self.source_classifier = nn.Sequential(
+            #     nn.ReLU(),
+            #     nn.Linear(FLAGS.SATRN.encoder.hidden_dim, 2)
+            # )
 
-            self.criterion = (
-                nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD]),
-                nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD]),
-                nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD]),
-            ) 
+            # self.criterion = (
+            #     nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD]),
+            #     nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD]),
+            #     nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD]),
+            # ) 
         else:
             self.criterion = (
                 nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD])
@@ -1203,17 +1255,17 @@ class SATRN(nn.Module):
         # input [B, C, H, W] = [B, 1, 128, 128]
         result = AttrDict()
 
-        if self.use_flexible_stn:
-            input, which = self.stn(input)
-            if return_stn:
-                result['stn'] = input.cpu().numpy()
-                result['which'] = which
+        # if self.use_flexible_stn:
+        #     input, which = self.stn(input)
+        #     if return_stn:
+        #         result['stn'] = input.cpu().numpy()
+        #         result['which'] = which
 
             
-        enc_result_dict = self.encoder(input) # [B, H*W, C] = [B, 16*16, 300]
-        enc_result = enc_result_dict['out']
-        h = enc_result_dict['h']
-        w = enc_result_dict['w']
+        enc_result, h, w = self.encoder(input) # [B, H*W, C] = [B, 16*16, 300]
+        # enc_result = enc_result_dict['out']
+        # h = enc_result_dict['h']
+        # w = enc_result_dict['w']
         b = input.size(0)
         if self.use_tube:
             pos_2d = enc_result.reshape(b, h, w, -1).permute(0, 3, 1, 2) # [B, C, H, W]
@@ -1224,7 +1276,7 @@ class SATRN(nn.Module):
         else:
             enc_2d = None
 
-        dec_result_dict = self.decoder(
+        dec_result = self.decoder(
             enc_result,
             expected[:, :-1],
             is_train,
@@ -1234,24 +1286,25 @@ class SATRN(nn.Module):
             enc_2d=enc_2d,
         )
 
-        dec_result = dec_result_dict['out']
-        if return_attn:
-            attns_1 = dec_result_dict['attns_1']
-            attns_2 = dec_result_dict['attns_2']
+        # dec_result = dec_result_dict['out']
+        # if return_attn:
+        #     attns_1 = dec_result_dict['attns_1']
+        #     attns_2 = dec_result_dict['attns_2']
 
-        result['out'] =dec_result
+        # result['out'] =dec_result
 
         if self.solve_extra_pb:
-            enc_mean = torch.mean(enc_result, dim=1) # [B, 300]
-            level_result = self.level_classifer(enc_mean) # [B, 5]
-            source_result = self.source_classifier(enc_mean) # [B, 5]
+            pass
+            # enc_mean = torch.mean(enc_result, dim=1) # [B, 300]
+            # level_result = self.level_classifer(enc_mean) # [B, 5]
+            # source_result = self.source_classifier(enc_mean) # [B, 5]
 
-            result['level_out'] = level_result
-            result['source_out'] = source_result
+            # result['level_out'] = level_result
+            # result['source_out'] = source_result
 
-        if return_attn:
-            result['enc_result'] = enc_result.reshape(b, h, w, -1).cpu().data.numpy()
-            result['attns_1'] = attns_1
-            result['attns_2'] = attns_2
+        # if return_attn:
+        #     result['enc_result'] = enc_result.reshape(b, h, w, -1).cpu().data.numpy()
+        #     result['attns_1'] = attns_1
+        #     result['attns_2'] = attns_2
         
-        return result
+        return dec_result

@@ -67,6 +67,9 @@ class Flags:
 
         if 'share_transformer' not in d['SATRN']:
             d['SATRN']['share_transformer'] = False
+        
+        if 'use_separable_cnn' not in d['SATRN']:
+            d['SATRN']['use_separable_cnn'] = False
 
         if 'multi_sample_dropout_ratio' not in d['SATRN']:
             d['SATRN']['multi_sample_dropout_ratio'] = None
@@ -74,8 +77,20 @@ class Flags:
         if 'multi_sample_dropout_nums' not in d['SATRN']:
             d['SATRN']['multi_sample_dropout_nums'] = None
 
+        if 'start_dim' not in d['SATRN']['encoder']:
+            d['SATRN']['encoder']['start_dim'] = 48
+
+        if 'depth' not in d['SATRN']['encoder']:
+            d['SATRN']['encoder']['depth'] = 16
+
+        if 'growth_rate' not in d['SATRN']['encoder']:
+            d['SATRN']['encoder']['growth_rate'] = 24
+
         if 'use_between_ff_layer' not in d['SATRN']['decoder']:
-            d['STARN']['decoder']['use_between_ff_layer'] = False
+            d['SATRN']['decoder']['use_between_ff_layer'] = False
+
+        if 'emb_dim' not in d['SATRN']['decoder']:
+            d['SATRN']['decoder']['emb_dim'] = d['SATRN']['decoder']['hidden_dim']
 
         if 'DecoderOnly' in d:
             if 'use_256_input' not in d['DecoderOnly']['encoder']:
