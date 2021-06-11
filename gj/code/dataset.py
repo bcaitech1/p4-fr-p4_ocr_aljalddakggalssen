@@ -6,14 +6,6 @@ from collections import defaultdict
 import numpy as np
 import torch
 from PIL import Image, ImageOps
-<<<<<<< HEAD
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
-from torch.utils.data import Sampler
-
-from tqdm.auto import trange, tqdm
-from torchvision import transforms
-=======
 from torch.utils.data import (
     Dataset,
     DataLoader,
@@ -26,18 +18,12 @@ import cv2
 from tqdm.auto import trange, tqdm
 from torchvision import transforms
 from copy import deepcopy
->>>>>>> test
 
 START = "<SOS>"
 END = "<EOS>"
 PAD = "<PAD>"
 SPECIAL_TOKENS = [START, END, PAD]
 
-<<<<<<< HEAD
-
-# Rather ignorant way to encode the truth, but at least it works.
-def encode_truth(truth, token_to_id):
-=======
 def claheCVT(own_img) :
     lab = cv2.cvtColor(own_img, cv2.COLOR_BGR2LAB)
     lab_planes = cv2.split(lab)
@@ -49,7 +35,6 @@ def claheCVT(own_img) :
 
 # Rather ignorant way to encode the truth, but at least it works.
 def encode_truth(truth, token_to_id, is_reverse=False):
->>>>>>> test
 
     truth_tokens = truth.split()
     for token in truth_tokens:
@@ -57,11 +42,8 @@ def encode_truth(truth, token_to_id, is_reverse=False):
             raise Exception("Truth contains unknown token")
     truth_tokens = [token_to_id[x] for x in truth_tokens]
     if '' in truth_tokens: truth_tokens.remove('')
-<<<<<<< HEAD
-=======
     if is_reverse:
         truth_tokens.reverse()
->>>>>>> test
     return truth_tokens
 
 
