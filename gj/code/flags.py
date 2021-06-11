@@ -60,6 +60,9 @@ class Flags:
         if 'apply_clihe' not in d['data']:
             d['data']['apply_clihe'] = False
 
+        if 'rotate_img' not in d['data']:
+            d['data']['rotate_img'] = False
+
         if 'flexible_stn' not in d['SATRN']:
             d['SATRN']['flexible_stn'] = {
                 'use': False

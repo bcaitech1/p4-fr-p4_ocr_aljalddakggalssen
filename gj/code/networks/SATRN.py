@@ -282,7 +282,11 @@ class ScaledDotProductAttention(nn.Module):
             attn += attn_bias
 
         if mask is not None:
-            attn = attn.masked_fill(mask=mask, value=-10000.0)
+            if attn.dtype == torch.half:
+                val = -10000.0
+            else:
+                val = -float('inf')
+            attn = attn.masked_fill(mask=mask, value=val)
         attn = torch.softmax(attn, dim=-1)
         attn = self.dropout(attn)
         out = torch.matmul(attn, v)
@@ -1214,6 +1218,7 @@ class SATRN(nn.Module):
             multi_sample_dropout_nums=FLAGS.SATRN.multi_sample_dropout_nums,
             share_transformer=FLAGS.SATRN.share_transformer,
             emb_dim=FLAGS.SATRN.decoder.emb_dim,
+            
         )
 
         if self.solve_extra_pb:

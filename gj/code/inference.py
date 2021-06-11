@@ -68,6 +68,7 @@ def main(parser):
         is_reverse=options.data.is_reverse,
         use_flip_channel=options.data.use_flip_channel,
         apply_clihe=options.data.apply_clihe,
+        rotate_img=options.data.rotate_img,
     )
 
     if options.data.flexible_image_size:

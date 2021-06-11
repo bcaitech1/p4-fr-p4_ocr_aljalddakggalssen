@@ -223,6 +223,7 @@ class LoadDataset(Dataset):
         use_curr=False,
         use_flip_channel=False,
         apply_clihe=False,
+        rotate_img=False,
     ):
         """
         Args:
@@ -236,6 +237,7 @@ class LoadDataset(Dataset):
         super(LoadDataset, self).__init__()
         self.use_curr = use_curr
         self.apply_clihe = apply_clihe
+        self.rotate_img = rotate_img
         self.crop = crop
         self.transform = transform
         self.rgb = rgb
@@ -287,6 +289,9 @@ class LoadDataset(Dataset):
             image = claheCVT(image)
             image = transforms.ToPILImage()(image)
 
+        if self.rotate_img and image.size[0] < image.size[1]:
+            image = transforms.RandomRotation((-90, -90), expand=True)(image)
+
         if self.rgb == 3:
             image = image.convert("RGB")
         elif self.rgb == 1:
@@ -324,6 +329,8 @@ class LoadDataset(Dataset):
             item = self.data[i]
             image = Image.open(item["path"])
             rw, rh = image.size
+            if self.rotate_img and rw < rh:
+                rw, rh = rh, rw
 
             T = self.max_resolution
             div = rw * rh / T
@@ -373,6 +380,7 @@ class LoadEvalDataset(Dataset):
         is_reverse=False,
         use_flip_channel=False,
         apply_clihe=False,
+        rotate_img=False,
     ):
         """
         Args:
@@ -391,6 +399,7 @@ class LoadEvalDataset(Dataset):
         self.id_to_token = id_to_token
         self.transform = transform
         self.apply_clihe = apply_clihe
+        self.rotate_img = rotate_img
         self.data = [
             {
                 "path": p,
@@ -425,6 +434,9 @@ class LoadEvalDataset(Dataset):
             image = claheCVT(image)
             image = transforms.ToPILImage()(image)
 
+        if self.rotate_img and image.size[0] < image.size[1]:
+            image = transforms.RandomRotation((-90, -90), expand=True)(image)
+
         if self.rgb == 3:
             image = image.convert("RGB")
         elif self.rgb == 1:
@@ -456,6 +468,9 @@ class LoadEvalDataset(Dataset):
             item = self.data[i]
             image = Image.open(item["path"])
             rw, rh = image.size
+
+            if self.rotate_img and rw < rh:
+                rw, rh = rh, rw
 
             T = self.max_resolution
             div = rw * rh / T
@@ -700,6 +715,7 @@ def dataset_loader(options, transformed):
         use_curr=options.curriculum_learning.using,
         use_flip_channel=options.data.use_flip_channel,
         apply_clihe=options.data.apply_clihe,
+        rotate_img=options.data.rotate_img,
     )
 
     valid_dataset = LoadDataset(
@@ -711,6 +727,7 @@ def dataset_loader(options, transformed):
         use_curr=options.curriculum_learning.using,
         use_flip_channel=options.data.use_flip_channel,
         apply_clihe=options.data.apply_clihe,
+        rotate_img=options.data.rotate_img,
     )
 
     if options.curriculum_learning.using:
