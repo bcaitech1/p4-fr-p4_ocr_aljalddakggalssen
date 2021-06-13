@@ -308,41 +308,41 @@ def run_trial(
             teacher_forcing_ratio = options.teacher_forcing_ratio- \
                     (epoch/(num_epochs-1))*tf_ratio_drop
         
+        if not options.run_only_valid:
+            train_result = run_epoch(
+                train_data_loader,
+                model,
+                epoch_text,
+                criterion,
+                enc_optimizer,
+                dec_optimizer,
+                enc_lr_scheduler,
+                dec_lr_scheduler,
+                teacher_forcing_ratio,
+                options.max_grad_norm,
+                device,
+                options=options,
+                use_amp=options.use_amp and device.type == 'cuda',
+                train=True,
+            )
 
-        train_result = run_epoch(
-            train_data_loader,
-            model,
-            epoch_text,
-            criterion,
-            enc_optimizer,
-            dec_optimizer,
-            enc_lr_scheduler,
-            dec_lr_scheduler,
-            teacher_forcing_ratio,
-            options.max_grad_norm,
-            device,
-            options=options,
-            use_amp=options.use_amp and device.type == 'cuda',
-            train=True,
-        )
+            train_losses.append(train_result["loss"])
+            # grad_norms.append(train_result["grad_norm"])
+            train_epoch_symbol_accuracy = (
+                train_result["correct_symbols"] / train_result["total_symbols"]
+            )
+            train_symbol_accuracy.append(train_epoch_symbol_accuracy)
+            train_epoch_sentence_accuracy = (
+                    train_result["sent_acc"] / train_result["num_sent_acc"]
+            )
 
-        train_losses.append(train_result["loss"])
-        # grad_norms.append(train_result["grad_norm"])
-        train_epoch_symbol_accuracy = (
-            train_result["correct_symbols"] / train_result["total_symbols"]
-        )
-        train_symbol_accuracy.append(train_epoch_symbol_accuracy)
-        train_epoch_sentence_accuracy = (
-                train_result["sent_acc"] / train_result["num_sent_acc"]
-        )
-
-        train_sentence_accuracy.append(train_epoch_sentence_accuracy)
-        train_epoch_wer = (
-                train_result["wer"] / train_result["num_wer"]
-        )
-        train_wer.append(train_epoch_wer)
-        enc_epoch_lr = enc_lr_scheduler.get_last_lr()[0]  # cycle
-        dec_epoch_lr = enc_lr_scheduler.get_last_lr()[0] 
+            train_sentence_accuracy.append(train_epoch_sentence_accuracy)
+            train_epoch_wer = (
+                    train_result["wer"] / train_result["num_wer"]
+            )
+            train_wer.append(train_epoch_wer)
+            enc_epoch_lr = enc_lr_scheduler.get_last_lr()[0]  # cycle
+            dec_epoch_lr = enc_lr_scheduler.get_last_lr()[0] 
 
         # Validation
         validation_result = run_epoch(
@@ -392,7 +392,7 @@ def run_trial(
         else:
             should_save = False
 
-        if should_save:
+        if should_save and not options.run_only_valid:
             with open(config_file, 'r') as f:
                     option_dict = yaml.safe_load(f)
 
@@ -424,33 +424,62 @@ def run_trial(
         elapsed_time = time.time() - start_time
         elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
         if epoch % options.print_epochs == 0 or epoch == options.num_epochs - 1:
-            output_string = (
+            if options.run_only_valid:
+                output_string = (
                 "{epoch_text}: "
-                "Train Symbol Accuracy = {train_symbol_accuracy:.5f}, "
-                "Train Sentence Accuracy = {train_sentence_accuracy:.5f}, "
-                "Train WER = {train_wer:.5f}, "
-                "Train Loss = {train_loss:.5f}, "
+                # "Train Symbol Accuracy = {train_symbol_accuracy:.5f}, "
+                # "Train Sentence Accuracy = {train_sentence_accuracy:.5f}, "
+                # "Train WER = {train_wer:.5f}, "
+                # "Train Loss = {train_loss:.5f}, "
                 "Validation Symbol Accuracy = {validation_symbol_accuracy:.5f}, "
                 "Validation Sentence Accuracy = {validation_sentence_accuracy:.5f}, "
                 "Validation WER = {validation_wer:.5f}, "
                 "Validation Loss = {validation_loss:.5f}, "
-                "enc_lr = {enc_lr} "
-                "dec_lr = {dec_lr} "
+                # "enc_lr = {enc_lr} "
+                # "dec_lr = {dec_lr} "
                 "(time elapsed {time})"
             ).format(
                 epoch_text=epoch_text,
-                train_symbol_accuracy=train_epoch_symbol_accuracy,
-                train_sentence_accuracy=train_epoch_sentence_accuracy,
-                train_wer=train_epoch_wer,
-                train_loss=train_result["loss"],
+                # train_symbol_accuracy=train_epoch_symbol_accuracy,
+                # train_sentence_accuracy=train_epoch_sentence_accuracy,
+                # train_wer=train_epoch_wer,
+                # train_loss=train_result["loss"],
                 validation_symbol_accuracy=validation_epoch_symbol_accuracy,
                 validation_sentence_accuracy=validation_epoch_sentence_accuracy,
                 validation_wer=validation_epoch_wer,
                 validation_loss=validation_result["loss"],
-                enc_lr=enc_epoch_lr,
-                dec_lr=dec_epoch_lr,
+                # enc_lr=enc_epoch_lr,
+                # dec_lr=dec_epoch_lr,
                 time=elapsed_time,
             )
+            else:
+                output_string = (
+                    "{epoch_text}: "
+                    "Train Symbol Accuracy = {train_symbol_accuracy:.5f}, "
+                    "Train Sentence Accuracy = {train_sentence_accuracy:.5f}, "
+                    "Train WER = {train_wer:.5f}, "
+                    "Train Loss = {train_loss:.5f}, "
+                    "Validation Symbol Accuracy = {validation_symbol_accuracy:.5f}, "
+                    "Validation Sentence Accuracy = {validation_sentence_accuracy:.5f}, "
+                    "Validation WER = {validation_wer:.5f}, "
+                    "Validation Loss = {validation_loss:.5f}, "
+                    "enc_lr = {enc_lr} "
+                    "dec_lr = {dec_lr} "
+                    "(time elapsed {time})"
+                ).format(
+                    epoch_text=epoch_text,
+                    train_symbol_accuracy=train_epoch_symbol_accuracy,
+                    train_sentence_accuracy=train_epoch_sentence_accuracy,
+                    train_wer=train_epoch_wer,
+                    train_loss=train_result["loss"],
+                    validation_symbol_accuracy=validation_epoch_symbol_accuracy,
+                    validation_sentence_accuracy=validation_epoch_sentence_accuracy,
+                    validation_wer=validation_epoch_wer,
+                    validation_loss=validation_result["loss"],
+                    enc_lr=enc_epoch_lr,
+                    dec_lr=dec_epoch_lr,
+                    time=elapsed_time,
+                )
             print(output_string)
             log_file.write(output_string + "\n")
 

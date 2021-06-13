@@ -104,13 +104,13 @@ def main(parser):
 
     if parser.use_rotation == 'yes':
         print('using rotation inference')
-        results = []
-        newresults=[]
+        results = {}
+        newresults={}
         crit=[]
         rot=[0,1,3,2]
         for i in rot[0:int(parser.direction_nums)]:
             print(f'{i} 번째 회전')
-            newresults=[]
+            newresults={}
             for d in tqdm(test_data_loader):
                 input = d["image"].to(device)
         #         print(input.shape)
@@ -119,6 +119,7 @@ def main(parser):
 
                 output = model(input, expected, False, 0.0)
                 decoded_values = output.transpose(1, 2)
+                # decoded_values = torch.softmax(decoded_values, dim=1)
                 score, sequence = torch.topk(decoded_values, 1, dim=1)
                 sequence = sequence.squeeze(1)
                 score = score.squeeze(1)
@@ -133,20 +134,22 @@ def main(parser):
                     print(sequence_str)
                 if i ==0:
                     for path, predicted, score in zip(d["file_path"], sequence_str,score):
-                        results.append([path, predicted,score[0]])
+                        results[path] = [predicted,score[0]]
                 else:
                     for path, predicted, score in zip(d["file_path"], sequence_str,score):
-                        newresults.append([path, predicted,score[0]])
-                    for k in range(len(newresults)):
-                        if (newresults[k][2]>results[k][2]) and (int(parser.ans_th)>results[k][2]):
+                        newresults[path] = [predicted,score[0]]
+                    for k in newresults:
+                        if (newresults[k][1]>results[k][1]) and (int(parser.ans_th)>results[k][1]):
                             results[k]=newresults[k]
     #             print('one rotation done')
                 
 
         os.makedirs(parser.output_dir, exist_ok=True)
         with open(os.path.join(parser.output_dir, "output.csv"), "w") as w:
-            for path, predicted,score in results:
-                w.write(path + "\t" + predicted  +"\n")
+            for i in range(len(test_dataset)):
+                path = test_dataset[i]['file_path']
+                predicted, _ = results[path]
+                w.write(path + "\t" + predicted + "\n")
     else:
         print('using normal inference')
         results = {}

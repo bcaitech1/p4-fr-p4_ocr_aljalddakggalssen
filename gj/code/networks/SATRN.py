@@ -1123,7 +1123,7 @@ class TransformerDecoder(nn.Module):
                 else:
                     _out = self.generator(tgt)
 
-                _out = self.generator(tgt)  # [b, 1, c]
+                # _out = self.generator(tgt)  # [b, 1, c]
                 target = torch.argmax(_out[:, -1:, :], dim=-1)  # [b, 1]
                 target = target.squeeze(-1)   # [b]
                 out.append(_out)
