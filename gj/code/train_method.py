@@ -73,6 +73,8 @@ def run_epoch(
     options,
     use_amp=False,
     train=True,
+    beam_search_k=1,
+    also_greedy=False,
 ):
     # Disables autograd during validation mode
     torch.set_grad_enabled(train)
@@ -130,25 +132,29 @@ def run_epoch(
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
 
             with autocast(enabled=use_amp):
-                output = model(input, expected, train, teacher_forcing_ratio)
+                output = model(input, expected, train, teacher_forcing_ratio,
+                    beam_search_k=beam_search_k, also_greedy=also_greedy)
                 # output = output_dict['out']
                 # if options.SATRN.solve_extra_pb:
                 #     level_result = output_dict['level_out']
                 #     source_result = output_dict['source_out']
 
-                decoded_values = output.transpose(1, 2)
-                _, sequence = torch.topk(decoded_values, 1, dim=1)
-                sequence = sequence.squeeze(1)
-
-                if options.SATRN.solve_extra_pb:
-                    loss_satrn = criterion[0](decoded_values, expected[:, 1:])
-                    loss_level = criterion[1](level_result, levels_expected)
-                    loss_source = criterion[2](source_result, sources_expected)
-                    loss = loss_satrn + loss_level + loss_source
+                if beam_search_k > 1:
+                    sequence = output
                 else:
-                    loss = criterion(decoded_values, expected[:, 1:])
-                
-                del decoded_values
+                    decoded_values = output.transpose(1, 2)
+                    _, sequence = torch.topk(decoded_values, 1, dim=1)
+                    sequence = sequence.squeeze(1)
+
+                    if options.SATRN.solve_extra_pb:
+                        loss_satrn = criterion[0](decoded_values, expected[:, 1:])
+                        loss_level = criterion[1](level_result, levels_expected)
+                        loss_source = criterion[2](source_result, sources_expected)
+                        loss = loss_satrn + loss_level + loss_source
+                    else:
+                        loss = criterion(decoded_values, expected[:, 1:])
+                    
+                    del decoded_values
 
             if train:
                 scaler.scale(loss).backward()
@@ -175,15 +181,16 @@ def run_epoch(
                     enc_lr_scheduler.step()
                     dec_lr_scheduler.step()
 
-            if options.SATRN.solve_extra_pb:
-                losses.append(loss.item() * len(input))
-                losses_satrn.append(loss_satrn.item() * len(input))
-                losses_level.append(loss_level.item() * len(input))
-                losses_source.append(loss_source.item() * len(input))
-            else:
-                losses.append(loss.item() * len(input))
-            
-            del loss, output
+            if beam_search_k ==  1:
+                if options.SATRN.solve_extra_pb:
+                    losses.append(loss.item() * len(input))
+                    losses_satrn.append(loss_satrn.item() * len(input))
+                    losses_level.append(loss_level.item() * len(input))
+                    losses_source.append(loss_source.item() * len(input))
+                else:
+                    losses.append(loss.item() * len(input))
+                
+                del loss, output
             total_inputs += len(input)
 
             expected = expected.cpu()
@@ -224,7 +231,6 @@ def run_epoch(
         }
     else:
         result = {
-            "loss": np.sum(losses) / total_inputs,
             "correct_symbols": correct_symbols,
             "total_symbols": total_symbols,
             "wer": wer,
@@ -232,6 +238,9 @@ def run_epoch(
             "sent_acc": sent_acc,
             "num_sent_acc":num_sent_acc
         }
+
+        if beam_search_k == 1:
+            result['loss'] = np.sum(losses) / total_inputs
 
     # if train:
     #     try:
@@ -360,8 +369,12 @@ def run_trial(
             options=options,
             use_amp=options.use_amp and device.type == 'cuda',
             train=False,
+            beam_search_k=options.beam_search_k,
+            also_greedy=options.also_greedy,
         )
-        validation_losses.append(validation_result["loss"])
+
+        if options.beam_search_k == 1:
+            validation_losses.append(validation_result["loss"])
         validation_epoch_symbol_accuracy = (
             validation_result["correct_symbols"] / validation_result["total_symbols"]
         )
@@ -425,6 +438,10 @@ def run_trial(
         elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
         if epoch % options.print_epochs == 0 or epoch == options.num_epochs - 1:
             if options.run_only_valid:
+                if options.beam_search_k == 1:
+                    val_loss_result = validation_result["loss"]
+                else:
+                    val_loss_result = 0
                 output_string = (
                 "{epoch_text}: "
                 # "Train Symbol Accuracy = {train_symbol_accuracy:.5f}, "
@@ -447,7 +464,7 @@ def run_trial(
                 validation_symbol_accuracy=validation_epoch_symbol_accuracy,
                 validation_sentence_accuracy=validation_epoch_sentence_accuracy,
                 validation_wer=validation_epoch_wer,
-                validation_loss=validation_result["loss"],
+                validation_loss=val_loss_result,
                 # enc_lr=enc_epoch_lr,
                 # dec_lr=dec_epoch_lr,
                 time=elapsed_time,

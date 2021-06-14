@@ -6,12 +6,13 @@ import math
 import random
 from attrdict import AttrDict
 
-from dataset import START, PAD
+from dataset import START, PAD, END
 
 from networks.TUBE import TUBEPosBias
 from networks.stn import FlexibleSTN
 from networks.CSTR_Module import CBAM, SAM, SADM_A
 from torchvision.transforms.functional import rotate
+from networks.beam_search import BeamInfo, BeamSearcher
 
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -890,6 +891,7 @@ class TransformerDecoder(nn.Module):
         dropout_rate,
         pad_id,
         st_id,
+        eos_id,
         device,
         layer_num=1,
         checkpoint=None,
@@ -947,6 +949,7 @@ class TransformerDecoder(nn.Module):
 
         self.pad_id = pad_id
         self.st_id = st_id
+        self.eos_id = eos_id
         self.device = device
 
         if self.use_tube:
@@ -977,9 +980,87 @@ class TransformerDecoder(nn.Module):
 
         return tgt
 
+    def _no_tf_decoder_inner_loop(self, t,  target, features, pos_enc_cache, src, enc_2d):
+        target = target.unsqueeze(1) # [B, 1]
+        tgt = self.text_embedding(target) # [B, 1, D]
+
+        if self.use_tube:
+            pos_enc = self.pos_encoder(tgt, method='plain') # [B, 1, D]
+            pos_enc_cache = ( 
+                pos_enc if pos_enc_cache is None else torch.cat([pos_enc_cache, pos_enc], 1)
+            )
+            
+            attn_bias = self.pos_attn_layer(pos_enc, pos_enc_cache[:, :t+1]) # [B, HEAD_NUM, 1, t+1]
+            # attn_cache[:, :, t, :t+1] = attn_bias.squeeze(2)
+            # cur_attn_bias = attn_cache[:, :, :t+1, :t+1]
+        
+            attn_2d_bias = self.pos_2d_attn_layer(pos_enc, enc_2d)
+            # attn_2d_cache[:, :, t] = .squeeze(2) # [B, HEAD_NUM, 1, H*W]
+            # cur_attn_2d_bias = attn_2d_cache[:, :, :t+1]
+        else:
+            tgt = self.pos_encoder(tgt, method='add') # [B, S, D]
+            attn_bias = None
+            attn_2d_bias = None
+
+        tgt_mask = self.order_mask(t + 1) # [1, t+1, t+1]
+        tgt_mask = tgt_mask[:, -1].unsqueeze(1)  # [1, t+1]
+
+        if self.share_transformer:
+            for l in range(self.layer_num):
+                tgt = self.attention_layers(tgt, features[l], 
+                    src, tgt_mask, False,
+                    attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
+                # tgt = layer_output_dict['out'] # [B, 1, D]
+                # if return_attn:
+                #     attn_1 = layer_output_dict['attn_1']
+                #     attn_2 = layer_output_dict['attn_2']
+
+                # features[l] [B, t+1, D]
+                features[l] = ( 
+                    tgt if features[l] is None else torch.cat([features[l], tgt], 1)
+                )
+
+                # if return_attn:
+                #     attns_1.append(attn_1.cpu().data.numpy())
+                #     attns_2.append(attn_2.cpu().data.numpy())
+        else:
+            for l, layer in enumerate(self.attention_layers):
+                tgt = layer(tgt, features[l], src, tgt_mask, False,
+                    attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
+                # tgt = layer_output_dict['out'] # [B, 1, D]
+                # if return_attn:
+                #     attn_1 = layer_output_dict['attn_1']
+                #     attn_2 = layer_output_dict['attn_2']
+
+                # features[l] [B, t+1, D]
+                features[l] = ( 
+                    tgt if features[l] is None else torch.cat([features[l], tgt], 1)
+                )
+
+                # if return_attn:
+                #     attns_1.append(attn_1.cpu().data.numpy())
+                #     attns_2.append(attn_2.cpu().data.numpy())
+
+        if self.use_multi_sample_dropout and self.training:
+            _out = torch.mean(
+                torch.stack(
+                    [
+                        self.generator(self.ms_dropout(tgt))
+                        for _ in range(self.multi_sample_dropout_nums)
+                    ], 
+                    dim = 0,
+                ),
+                dim = 0
+            ) # B xx xx
+        else:
+            _out = self.generator(tgt)
+
+        return _out, features, pos_enc_cache
+
+
     def forward(
         self, src, text, is_train=True, batch_max_length=50, teacher_forcing_ratio=1.0,
-        return_attn=False, enc_2d=None,
+        return_attn=False, enc_2d=None, beam_search_k=1, also_greedy=False,
     ): 
         # src [B, H*W, C]
         # enc_2d [B, H*W, C]
@@ -1034,110 +1115,96 @@ class TransformerDecoder(nn.Module):
         else:
             out = []
             num_steps = batch_max_length - 1
-
-            # target [B]
             b = src.size(0)
-            target = torch.LongTensor(b).view(-1).fill_(self.st_id).to(self.device) # [START] token
-            features = [None] * self.layer_num
+
+            if beam_search_k > 1:
+                bs = BeamSearcher(beam_search_k, self.st_id, self.eos_id, self.pad_id, self.layer_num,
+                    b, batch_max_length, self.device, use_tube=self.use_tube)
+                bs.reset()
+            else:
+                target = torch.LongTensor(b).view(-1).fill_(self.st_id).to(self.device) # [START] token
+                features = [None] * self.layer_num
+                pos_enc_cache = None
 
             if return_attn:
                 attns_1 = []
                 attns_2 = []
 
-            if self.use_tube:
-                pos_enc_cache = None
-                # attn_cache = torch.zeros(b, self.head_num, num_steps, num_steps).to(self.device)
-                # attn_2d_cache = torch.zeros(b, self.head_num, num_steps, src.size(1)).to(self.device)
-            for t in range(num_steps):
-                target = target.unsqueeze(1) # [B, 1]
-                tgt = self.text_embedding(target) # [B, 1, D]
 
-                if self.use_tube:
-                    pos_enc = self.pos_encoder(tgt, method='plain') # [B, 1, D]
-                    pos_enc_cache = ( 
-                        pos_enc if pos_enc_cache is None else torch.cat([pos_enc_cache, pos_enc], 1)
-                    )
-                    
-                    attn_bias = self.pos_attn_layer(pos_enc, pos_enc_cache[:, :t+1]) # [B, HEAD_NUM, 1, t+1]
-                    # attn_cache[:, :, t, :t+1] = attn_bias.squeeze(2)
-                    # cur_attn_bias = attn_cache[:, :, :t+1, :t+1]
+            if beam_search_k > 1:
+                for t in range(num_steps):
+                    for bs_idx in range(bs.cur_max_idx):
+                        bs_info = bs.get(bs_idx)
+                        target = bs_info.seq[:, -1]
+                        features = bs_info.features
+                        pos_enc_cache = bs_info.pos_enc_cache
+
+                        _out, features, pos_enc_cache = self._no_tf_decoder_inner_loop(
+                            t,
+                            target,
+                            features, 
+                            pos_enc_cache,
+                            src,
+                            enc_2d,
+                        )
+
+                        bs.add(bs_idx, features, _out.squeeze(1), pos_enc_cache)
+
+                    last = t == num_steps - 1
+                    if not bs.keep_k(last):
+                        break
+                best_result, scores = bs.get_best()
+
+                if also_greedy:
+                    gbs = BeamSearcher(1, self.st_id, self.eos_id, self.pad_id, self.layer_num,
+                    b, batch_max_length, self.device, use_tube=self.use_tube)
+                    gbs.reset()
+                    for t in range(num_steps):
+                        gbs_info = gbs.get(0)
+                        target = gbs_info.seq[:, -1]
+                        features = gbs_info.features
+                        pos_enc_cache = gbs_info.pos_enc_cache
+
+                        _out, features, pos_enc_cache = self._no_tf_decoder_inner_loop(
+                            t,
+                            target,
+                            features, 
+                            pos_enc_cache,
+                            src,
+                            enc_2d,
+                        )
+
+                        gbs.add(0, features, _out.squeeze(1), pos_enc_cache)
+
+                        last = t == num_steps - 1
+                        if not gbs.keep_k(last):
+                            break
+                    g_best_result, g_scores = gbs.get_best()
+
+                    for i in range(b):
+                        if scores[i] < g_scores[i]:
+                            best_result[i] = g_best_result[i]
                 
-                    attn_2d_bias = self.pos_2d_attn_layer(pos_enc, enc_2d)
-                    # attn_2d_cache[:, :, t] = .squeeze(2) # [B, HEAD_NUM, 1, H*W]
-                    # cur_attn_2d_bias = attn_2d_cache[:, :, :t+1]
-                else:
-                    tgt = self.pos_encoder(tgt, method='add') # [B, S, D]
-                    attn_bias = None
-                    attn_2d_bias = None
+                return best_result
+            else:  
+                for t in range(num_steps):
+                    _out, features, pos_enc_cache = self._no_tf_decoder_inner_loop(
+                        t,
+                        target,
+                        features, 
+                        pos_enc_cache,
+                        src,
+                        enc_2d,
+                    )
 
-                tgt_mask = self.order_mask(t + 1) # [1, t+1, t+1]
-                tgt_mask = tgt_mask[:, -1].unsqueeze(1)  # [1, t+1]
-
-                if self.share_transformer:
-                    for l in range(self.layer_num):
-                        tgt = self.attention_layers(tgt, features[l], 
-                            src, tgt_mask, return_attn,
-                            attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                        # tgt = layer_output_dict['out'] # [B, 1, D]
-                        # if return_attn:
-                        #     attn_1 = layer_output_dict['attn_1']
-                        #     attn_2 = layer_output_dict['attn_2']
-
-                        # features[l] [B, t+1, D]
-                        features[l] = ( 
-                            tgt if features[l] is None else torch.cat([features[l], tgt], 1)
-                        )
-
-                        # if return_attn:
-                        #     attns_1.append(attn_1.cpu().data.numpy())
-                        #     attns_2.append(attn_2.cpu().data.numpy())
-                else:
-                    for l, layer in enumerate(self.attention_layers):
-                        tgt = layer(tgt, features[l], src, tgt_mask, return_attn,
-                            attn_bias=attn_bias, attn_2d_bias=attn_2d_bias)
-                        # tgt = layer_output_dict['out'] # [B, 1, D]
-                        # if return_attn:
-                        #     attn_1 = layer_output_dict['attn_1']
-                        #     attn_2 = layer_output_dict['attn_2']
-
-                        # features[l] [B, t+1, D]
-                        features[l] = ( 
-                            tgt if features[l] is None else torch.cat([features[l], tgt], 1)
-                        )
-
-                        # if return_attn:
-                        #     attns_1.append(attn_1.cpu().data.numpy())
-                        #     attns_2.append(attn_2.cpu().data.numpy())
-
-                if self.use_multi_sample_dropout and self.training:
-                    _out = torch.mean(
-                        torch.stack(
-                            [
-                                self.generator(self.ms_dropout(tgt))
-                                for _ in range(self.multi_sample_dropout_nums)
-                            ], 
-                            dim = 0,
-                        ),
-                        dim = 0
-                    ) # B xx xx
-                else:
-                    _out = self.generator(tgt)
-
-                # _out = self.generator(tgt)  # [b, 1, c]
-                target = torch.argmax(_out[:, -1:, :], dim=-1)  # [b, 1]
-                target = target.squeeze(-1)   # [b]
-                out.append(_out)
-            
-            out = torch.stack(out, dim=1).to(self.device)    # [b, max length, 1, class length]
-            out = out.squeeze(2)    # [b, max length, class length]
-
-        # result = AttrDict(
-        #     out=out
-        # )
-        # if return_attn:
-        #     result['attns_1'] = attns_1
-        #     result['attns_2'] = attns_2
-        return out
+                    # _out = self.generator(tgt)  # [b, 1, c]
+                    target = torch.argmax(_out[:, -1:, :], dim=-1)  # [b, 1]
+                    target = target.squeeze(-1)   # [b]
+                    out.append(_out)
+                
+                out = torch.stack(out, dim=1).to(self.device)    # [b, max length, 1, class length]
+                out = out.squeeze(2)    # [b, max length, class length]
+                return out
 
 class SATRN(nn.Module):
     def __init__(self, FLAGS, train_dataset, device, checkpoint=None):
@@ -1209,6 +1276,7 @@ class SATRN(nn.Module):
             dropout_rate=FLAGS.dropout_rate,
             pad_id=train_dataset.token_to_id[PAD],
             st_id=train_dataset.token_to_id[START],
+            eos_id=train_dataset.token_to_id[END],
             layer_num=FLAGS.SATRN.decoder.layer_num,
             device=device,
             use_tube=self.use_tube,
@@ -1256,7 +1324,7 @@ class SATRN(nn.Module):
             )
 
     def forward(self, input, expected, is_train, teacher_forcing_ratio,
-             return_attn=False, return_stn=False):
+             return_attn=False, return_stn=False, beam_search_k=1, also_greedy=False):
         # input [B, C, H, W] = [B, 1, 128, 128]
         result = AttrDict()
 
@@ -1289,6 +1357,8 @@ class SATRN(nn.Module):
             teacher_forcing_ratio,
             return_attn=return_attn,
             enc_2d=enc_2d,
+            beam_search_k=beam_search_k,
+            also_greedy=also_greedy,
         )
 
         # dec_result = dec_result_dict['out']

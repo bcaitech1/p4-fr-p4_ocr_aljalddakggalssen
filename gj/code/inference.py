@@ -118,6 +118,7 @@ def main(parser):
                 expected = d["truth"]["encoded"].to(device)
 
                 output = model(input, expected, False, 0.0)
+                    
                 decoded_values = output.transpose(1, 2)
                 # decoded_values = torch.softmax(decoded_values, dim=1)
                 score, sequence = torch.topk(decoded_values, 1, dim=1)
@@ -151,17 +152,24 @@ def main(parser):
                 predicted, _ = results[path]
                 w.write(path + "\t" + predicted + "\n")
     else:
+        also_greedy = parser.also_greedy == 'yes'
+        print('also_greedy', also_greedy)
         print('using normal inference')
         results = {}
         for d in tqdm(test_data_loader):
             input = d["image"].to(device)
             expected = d["truth"]["encoded"].to(device)
 
-            output = model(input, expected, False, 0.0)
-            # output = output_dict['out']
-            decoded_values = output.transpose(1, 2)
-            _, sequence = torch.topk(decoded_values, 1, dim=1)
-            sequence = sequence.squeeze(1)
+            output = model(input, expected, False, 0.0,
+                beam_search_k=parser.beam_search_k, also_greedy=also_greedy)
+
+            if parser.beam_search_k > 1:
+                sequence = output
+            else:
+                decoded_values = output.transpose(1, 2)
+                _, sequence = torch.topk(decoded_values, 1, dim=1)
+                sequence = sequence.squeeze(1)
+
             sequence_str = id_to_string(sequence, test_data_loader, do_eval=1)
             for path, predicted in zip(d["file_path"], sequence_str):
                 results[path] =  predicted
@@ -193,7 +201,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         dest="batch_size",
-        default=2,
+        default=8,
         type=int,
         help="batch size when doing inference",
     )
@@ -243,6 +251,20 @@ if __name__ == "__main__":
         "--rotation_print",
         dest="rotation_print",
         default="yes",
+        type=str,
+    )
+
+    parser.add_argument(
+        "--beam_search_k",
+        dest="beam_search_k",
+        default=1,
+        type=int,
+    )
+    
+    parser.add_argument(
+        "--also_greedy",
+        dest="also_greedy",
+        default="no",
         type=str,
     )
 
