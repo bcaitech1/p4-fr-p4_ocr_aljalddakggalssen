@@ -1112,6 +1112,7 @@ class TransformerDecoder(nn.Module):
                 ) # B xx xx
             else:
                 out = self.generator(tgt)
+            return out
         else:
             out = []
             num_steps = batch_max_length - 1
